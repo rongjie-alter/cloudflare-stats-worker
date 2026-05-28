@@ -34,7 +34,7 @@ function formatSection(title) {
       const data = await fetchJson(path);
       console.dir(data, { depth: null, colors: true });
     } catch (error) {
-      console.error('  ✗ error:', error.message);
+      console.error('  x error:', error.message);
     }
     await delay(150);
   }

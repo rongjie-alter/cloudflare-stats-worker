@@ -508,15 +508,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 </div>
                 <div class="hero__actions">
                     <button id="theme-toggle" class="pill-button" type="button">
-                        <span id="theme-icon" class="icon">🌙</span>
                         <span id="theme-text" data-i18n="darkMode">深色模式</span>
                     </button>
                     <button id="lang-toggle" class="pill-button" type="button">
-                        <span class="icon">🌐</span>
                         <span id="lang-text">EN</span>
                     </button>
                     <a id="repo-link" class="pill-button" href="https://github.com/Zakkaus/cloudflare-stats-worker" target="_blank" rel="noopener">
-                        <span class="icon">💻</span>
                         <span data-i18n="githubRepo">GitHub</span>
                     </a>
                 </div>
@@ -569,7 +566,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <section class="card chart-card" data-animate="6">
                 <div class="chart-header">
                     <div>
-                        <h3 data-i18n="dailyTrend">📈 每日訪問趨勢</h3>
+                        <h3 data-i18n="dailyTrend">每日訪問趨勢</h3>
                         <p id="daily-error" class="chart-error" role="alert"></p>
                     </div>
                     <div class="chart-controls">
@@ -584,7 +581,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </section>
 
             <section class="card search-card" data-animate="7">
-                <h3 data-i18n="searchPage">🔍 查詢頁面統計</h3>
+                <h3 data-i18n="searchPage">查詢頁面統計</h3>
                 <form id="search-form" autocomplete="off">
                     <input id="path-input" type="text" name="path" placeholder="/posts/hello-world/" data-i18n-placeholder="searchPlaceholder">
                     <button id="search-btn" class="primary" type="submit" data-i18n="search">查詢</button>
@@ -601,7 +598,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
             <section class="card top-card" data-animate="8">
                 <div class="header">
-                    <h3 data-i18n="topPages">🔥 熱門頁面 Top 10</h3>
+                    <h3 data-i18n="topPages">熱門頁面 Top 10</h3>
                 </div>
                 <div id="top-loading" class="top-loading" data-i18n="loading">載入中...</div>
                 <div id="top-error" class="top-error" role="alert"></div>
@@ -632,21 +629,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     todayPageViews: "今日瀏覽量",
                     todayUniqueVisitors: "今日訪客數",
                     apiStatus: "API 當前狀態",
-                    dailyTrend: "📈 每日訪問趨勢",
+                    dailyTrend: "每日訪問趨勢",
                     last7Days: "過去 7 天",
                     last14Days: "過去 14 天",
                     last30Days: "過去 30 天",
-                    searchPage: "🔍 查詢頁面統計",
+                    searchPage: "查詢頁面統計",
                     searchPlaceholder: "輸入路徑，例如: /posts/hello-world/",
                     search: "查詢",
                     pageViews: "頁面瀏覽量",
                     uniqueVisitors: "獨立訪客",
-                    topPages: "🔥 熱門頁面 Top 10",
+                    topPages: "熱門頁面 Top 10",
                     loading: "載入中...",
                     total: "總計",
                     today: "今日",
-                    normal: "✅ 正常",
-                    error: "❌ 錯誤",
+                    normal: "正常",
+                    error: "錯誤",
                     version: "版本",
                     cannotConnect: "無法連接",
                     loadFailed: "載入失敗",
@@ -674,21 +671,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     todayPageViews: "Today's Views",
                     todayUniqueVisitors: "Today's Unique Visitors",
                     apiStatus: "API Status",
-                    dailyTrend: "📈 Daily Traffic Trend",
+                    dailyTrend: "Daily Traffic Trend",
                     last7Days: "Last 7 Days",
                     last14Days: "Last 14 Days",
                     last30Days: "Last 30 Days",
-                    searchPage: "🔍 Search Page Stats",
+                    searchPage: "Search Page Stats",
                     searchPlaceholder: "Enter path, e.g. /posts/hello-world/",
                     search: "Search",
                     pageViews: "Page Views",
                     uniqueVisitors: "Unique Visitors",
-                    topPages: "🔥 Top 10 Pages",
+                    topPages: "Top 10 Pages",
                     loading: "Loading...",
                     total: "Total",
                     today: "Today",
-                    normal: "✅ Normal",
-                    error: "❌ Error",
+                    normal: "Normal",
+                    error: "Error",
                     version: "Version",
                     cannotConnect: "Cannot Connect",
                     loadFailed: "Load Failed",
@@ -800,10 +797,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     return;
                 }
                 if (state.theme === "dark") {
-                    elements.themeIcon.textContent = "🌙";
+                    elements.themeIcon.textContent = "";
                     elements.themeText.textContent = t("darkMode");
                 } else {
-                    elements.themeIcon.textContent = "☀️";
+                    elements.themeIcon.textContent = "";
                     elements.themeText.textContent = t("lightMode");
                 }
             }

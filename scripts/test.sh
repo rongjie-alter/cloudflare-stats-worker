@@ -1,104 +1,135 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
+# Smoke-test the deployed Cloudflare Stats Worker. Defaults to stats.zakk.au.
+# Override with: STATS_HOST=https://your.worker.example.com ./scripts/test.sh
 
-# Cloudflare Stats Worker v1.3.0 - 功能測試腳本
+set -euo pipefail
 
-BASE_URL="https://stats.zakk.au"
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+BASE_URL=${STATS_HOST:-${1:-https://stats.zakk.au}}
 
-echo -e "${BLUE}🧪 Cloudflare Stats Worker v1.3.0 測試開始${NC}\n"
+PASS="\033[0;32mPASS\033[0m"
+FAIL="\033[0;31mFAIL\033[0m"
+WARN="\033[1;33mWARN\033[0m"
+INFO="\033[0;34mINFO\033[0m"
 
-# 測試 1: 健康檢查
-echo -e "${BLUE}[1/6] 測試健康檢查端點...${NC}"
-HEALTH=$(curl -s "${BASE_URL}/health")
-if echo "$HEALTH" | grep -q '"status":"ok"'; then
-    echo -e "${GREEN}✅ 健康檢查通過${NC}"
-    echo "$HEALTH" | jq '.'
+pass_count=0
+fail_count=0
+
+step() {
+  printf "[%b] %s\n" "$INFO" "$1"
+}
+
+mark_pass() {
+  printf "       [%b] %s\n" "$PASS" "$1"
+  pass_count=$((pass_count + 1))
+}
+
+mark_fail() {
+  printf "       [%b] %s\n" "$FAIL" "$1"
+  fail_count=$((fail_count + 1))
+}
+
+mark_warn() {
+  printf "       [%b] %s\n" "$WARN" "$1"
+}
+
+require_jq() {
+  command -v jq >/dev/null 2>&1 || {
+    printf "[%b] jq is required (install with 'brew install jq' or your package manager)\n" "$FAIL" >&2
+    exit 1
+  }
+}
+
+http_get() {
+  curl --silent --show-error --max-time 10 "$1"
+}
+
+require_jq
+
+printf "Stats Worker smoke test\n"
+printf "Target: %s\n\n" "$BASE_URL"
+
+# 1. Health
+step "Health check (/health)"
+if HEALTH=$(http_get "$BASE_URL/health"); then
+  if echo "$HEALTH" | jq -e '.status == "ok"' >/dev/null 2>&1; then
+    mark_pass "status=ok"
+  else
+    mark_fail "unexpected response: $HEALTH"
+  fi
 else
-    echo -e "${RED}❌ 健康檢查失敗${NC}"
+  mark_fail "request failed"
 fi
-echo ""
 
-# 測試 2: 儀表板 HTML
-echo -e "${BLUE}[2/6] 測試儀表板 HTML...${NC}"
-DASHBOARD=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/")
-if [ "$DASHBOARD" -eq 200 ]; then
-    echo -e "${GREEN}✅ 儀表板可訪問 (HTTP 200)${NC}"
-    # 檢查內容
-    CONTENT=$(curl -s "${BASE_URL}/")
-    if echo "$CONTENT" | grep -q "統計數據儀表板"; then
-        echo -e "${GREEN}✅ 儀表板包含正確標題${NC}"
+# 2. Dashboard HTML
+step "Dashboard (/)"
+if DASHBOARD_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$BASE_URL/"); then
+  if [ "$DASHBOARD_STATUS" = "200" ]; then
+    mark_pass "HTTP 200"
+    if curl -s --max-time 10 "$BASE_URL/" | grep -q 'data-i18n="title"'; then
+      mark_pass "i18n payload present"
+    else
+      mark_fail "i18n payload missing"
     fi
-    if echo "$CONTENT" | grep -q "Chart.js"; then
-        echo -e "${GREEN}✅ 儀表板包含 Chart.js${NC}"
-    fi
-    if echo "$CONTENT" | grep -q "data-theme"; then
-        echo -e "${GREEN}✅ 儀表板支持主題切換${NC}"
-    fi
+  else
+    mark_fail "HTTP $DASHBOARD_STATUS"
+  fi
 else
-    echo -e "${RED}❌ 儀表板無法訪問 (HTTP $DASHBOARD)${NC}"
+  mark_fail "request failed"
 fi
-echo ""
 
-# 測試 3: 查詢統計 API
-echo -e "${BLUE}[3/6] 測試統計查詢 API...${NC}"
-STATS=$(curl -s "${BASE_URL}/api/stats?url=/")
-if echo "$STATS" | grep -q '"success":true'; then
-    echo -e "${GREEN}✅ 統計查詢成功${NC}"
-    echo "$STATS" | jq '.'
+# 3. Page stats query
+step "Site stats (/api/stats)"
+if SITE=$(http_get "$BASE_URL/api/stats"); then
+  if echo "$SITE" | jq -e '.success == true and (.site.pv | type) == "number"' >/dev/null 2>&1; then
+    mark_pass "site totals returned"
+  else
+    mark_fail "unexpected response: $SITE"
+  fi
 else
-    echo -e "${RED}❌ 統計查詢失敗${NC}"
+  mark_fail "request failed"
 fi
-echo ""
 
-# 測試 4: 增加計數 API
-echo -e "${BLUE}[4/6] 測試增加計數 API...${NC}"
-COUNT=$(curl -s "${BASE_URL}/api/count?url=/test-page/")
-if echo "$COUNT" | grep -q '"success":true'; then
-    echo -e "${GREEN}✅ 計數增加成功${NC}"
-    echo "$COUNT" | jq '.'
+# 4. Counter increment
+step "Counter increment (/api/count)"
+if COUNT=$(http_get "$BASE_URL/api/count?url=/_smoke-test/"); then
+  if echo "$COUNT" | jq -e '.success == true and (.page.pv | type) == "number"' >/dev/null 2>&1; then
+    mark_pass "increment ok"
+  else
+    mark_fail "unexpected response: $COUNT"
+  fi
 else
-    echo -e "${RED}❌ 計數增加失敗${NC}"
+  mark_fail "request failed"
 fi
-echo ""
 
-# 測試 5: 批量查詢 API
-echo -e "${BLUE}[5/6] 測試批量查詢 API...${NC}"
-BATCH=$(curl -s "${BASE_URL}/api/batch?urls=/,/about/,/posts/")
-if echo "$BATCH" | grep -q '"success":true'; then
-    echo -e "${GREEN}✅ 批量查詢成功${NC}"
-    echo "$BATCH" | jq '.'
+# 5. Batch lookup
+step "Batch (/api/batch)"
+if BATCH=$(http_get "$BASE_URL/api/batch?urls=/,/about/,/posts/"); then
+  if echo "$BATCH" | jq -e '.success == true and (.count | type) == "number"' >/dev/null 2>&1; then
+    mark_pass "batch ok ($(echo "$BATCH" | jq -r '.count') paths)"
+  else
+    mark_fail "unexpected response: $BATCH"
+  fi
 else
-    echo -e "${RED}❌ 批量查詢失敗${NC}"
+  mark_fail "request failed"
 fi
-echo ""
 
-# 測試 6: 熱門頁面 API（可能未配置 D1）
-echo -e "${BLUE}[6/6] 測試熱門頁面 API (D1)...${NC}"
-TOP=$(curl -s "${BASE_URL}/api/top?limit=5")
-if echo "$TOP" | grep -q '"success":true'; then
-    echo -e "${GREEN}✅ 熱門頁面查詢成功${NC}"
-    echo "$TOP" | jq '.'
-elif echo "$TOP" | grep -q '"success":false'; then
-    echo -e "${BLUE}ℹ️  熱門頁面 API 未啟用（需要配置 D1）${NC}"
-    echo "$TOP" | jq '.'
+# 6. Top pages (D1 optional)
+step "Top pages (/api/top, optional)"
+if TOP=$(http_get "$BASE_URL/api/top?limit=5" || true); then
+  if echo "$TOP" | jq -e '.success == true' >/dev/null 2>&1; then
+    mark_pass "top pages ok"
+  elif echo "$TOP" | jq -e '.success == false' >/dev/null 2>&1; then
+    mark_warn "D1 not configured (skipping)"
+  else
+    mark_fail "unexpected response: $TOP"
+  fi
 else
-    echo -e "${RED}❌ 熱門頁面查詢失敗${NC}"
+  mark_fail "request failed"
 fi
-echo ""
 
-# 總結
-echo -e "${BLUE}═══════════════════════════════════════${NC}"
-echo -e "${BLUE}📊 測試完成！${NC}"
-echo -e "${BLUE}═══════════════════════════════════════${NC}"
-echo ""
-echo "儀表板地址: ${BASE_URL}/"
-echo "API 文檔: https://github.com/Zakkaus/cloudflare-stats-worker"
-echo ""
-echo -e "${GREEN}提示: 在瀏覽器中打開儀表板以查看完整功能：${NC}"
-echo "  • 每日趨勢圖表（7/14/30 天）"
-echo "  • 深淺色模式切換"
-echo "  • 頁面搜尋"
-echo "  • 熱門頁面排行"
+printf "\nSummary: %d passed, %d failed\n" "$pass_count" "$fail_count"
+
+if [ "$fail_count" -gt 0 ]; then
+  exit 1
+fi
