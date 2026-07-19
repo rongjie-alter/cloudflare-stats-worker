@@ -44,7 +44,7 @@ Read endpoints (`/api/query|timeseries|summary|config`) are cached 30s via the C
 
 ### Query dimensions (whitelist)
 
-`path, referrer_domain, referrer_path, country, browser, browser_version, os, os_version, device_type, device_vendor, device_model`. Filters use `dimension:value` tokens in `filter=` (include) / `exclude=`.
+`path, referrer_domain, country, browser, browser_version, os, os_version, device_type, device_vendor, device_model`. Filters use `dimension:value` tokens in `filter=` (include) / `exclude=`.
 
 ## Configuration (`wrangler.toml [vars]`)
 

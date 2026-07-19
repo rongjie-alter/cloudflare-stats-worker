@@ -5,7 +5,6 @@ export type Metric = "visitors" | "pageviews";
 export type Dimension =
   | "path"
   | "referrer_domain"
-  | "referrer_path"
   | "country"
   | "browser"
   | "browser_version"

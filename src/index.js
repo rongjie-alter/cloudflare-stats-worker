@@ -81,7 +81,6 @@ const MAX_DIM_CACHE_ENTRIES = 10000; // FIFO cap on the isolate-global dim-id ca
 const DIMENSIONS = {
   path: { col: "path_id", table: "dim_path_tab" },
   referrer_domain: { col: "ref_domain_id", table: "dim_ref_domain_tab" },
-  referrer_path: { col: "ref_path_id", table: "dim_ref_path_tab" },
   country: { col: "country_id", table: "dim_country_tab" },
   browser: { col: "browser_id", table: "dim_browser_tab" },
   browser_version: { col: "browser_ver_id", table: "dim_browser_ver_tab" },
@@ -94,7 +93,6 @@ const DIMENSIONS = {
 
 // Parent dimension for detail views: child -> parent.
 const PARENT_DIMS = {
-  referrer_path: "referrer_domain",
   browser_version: "browser",
   os_version: "os",
 };
@@ -242,7 +240,6 @@ async function recordEvent(db, e) {
   const [
     pathId,
     refDomainId,
-    refPathId,
     countryId,
     browserId,
     browserVerId,
@@ -254,7 +251,6 @@ async function recordEvent(db, e) {
   ] = await Promise.all([
     getDimId(db, "dim_path_tab", e.path),
     getDimId(db, "dim_ref_domain_tab", e.ref.domain),
-    getDimId(db, "dim_ref_path_tab", e.ref.path),
     getDimId(db, "dim_country_tab", e.country),
     getDimId(db, "dim_browser_tab", e.ua.browser.name),
     getDimId(db, "dim_browser_ver_tab", e.ua.browser.version),
@@ -268,17 +264,16 @@ async function recordEvent(db, e) {
   await db
     .prepare(
       `INSERT INTO events_tab
-        (day, visitor_id, path_id, ref_domain_id, ref_path_id, country_id,
+        (day, visitor_id, path_id, ref_domain_id, country_id,
          browser_id, browser_ver_id, os_id, os_ver_id,
          device_type_id, device_vendor_id, device_model_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
     )
     .bind(
       e.day,
       e.visitorId,
       pathId,
       refDomainId,
-      refPathId,
       countryId,
       browserId,
       browserVerId,

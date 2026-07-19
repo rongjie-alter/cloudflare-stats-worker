@@ -84,7 +84,7 @@ It POSTs `{ path, referrer }` to `/api/send` via `XMLHttpRequest`. Only requests
 | `GET` | `/health` | `{ status, version, timestamp }` |
 | `*` | | Dashboard SPA (static assets) |
 
-**Dimensions:** `path, referrer_domain, referrer_path, country, browser, browser_version, os, os_version, device_type, device_vendor, device_model`.
+**Dimensions:** `path, referrer_domain, country, browser, browser_version, os, os_version, device_type, device_vendor, device_model`.
 
 Example:
 

@@ -16,7 +16,6 @@
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS dim_path_tab          (id INTEGER PRIMARY KEY, value TEXT UNIQUE NOT NULL);
 CREATE TABLE IF NOT EXISTS dim_ref_domain_tab    (id INTEGER PRIMARY KEY, value TEXT UNIQUE NOT NULL);
-CREATE TABLE IF NOT EXISTS dim_ref_path_tab      (id INTEGER PRIMARY KEY, value TEXT UNIQUE NOT NULL);
 CREATE TABLE IF NOT EXISTS dim_country_tab       (id INTEGER PRIMARY KEY, value TEXT UNIQUE NOT NULL);
 CREATE TABLE IF NOT EXISTS dim_browser_tab       (id INTEGER PRIMARY KEY, value TEXT UNIQUE NOT NULL);
 CREATE TABLE IF NOT EXISTS dim_browser_ver_tab   (id INTEGER PRIMARY KEY, value TEXT UNIQUE NOT NULL);
@@ -35,7 +34,6 @@ CREATE TABLE IF NOT EXISTS events_tab (
   visitor_id       INTEGER NOT NULL,      -- first 13 hex of SHA-256(ip|ua) as 52-bit int
   path_id          INTEGER NOT NULL,
   ref_domain_id    INTEGER,               -- NULL = direct / no referrer
-  ref_path_id      INTEGER,               -- high-cardinality, low-priority
   country_id       INTEGER,
   browser_id       INTEGER,
   browser_ver_id   INTEGER,               -- low-priority
@@ -71,7 +69,7 @@ CREATE TABLE IF NOT EXISTS site_daily_tab (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS events_monthly_tab (
   month     INTEGER NOT NULL,   -- yyyymm
-  dimension TEXT    NOT NULL,   -- 'total','path','referrer_domain','referrer_path','country',
+  dimension TEXT    NOT NULL,   -- 'total','path','referrer_domain','country',
                                 -- 'browser','browser_version','os','os_version',
                                 -- 'device_type','device_vendor','device_model'
   value     TEXT    NOT NULL,   -- dimension value; '' for the 'total' row

@@ -69,23 +69,23 @@ export function parseUserAgent(userAgent) {
 }
 
 /**
- * Parse the client-reported referrer (document.referrer) into a domain + path.
- * - empty referrer            => { domain: null, path: null }  (direct)
- * - same-origin as the site   => { domain: '(internal)', path: <pathname> }
- * - external                  => { domain: <hostname>, path: <pathname> }
+ * Parse the client-reported referrer (document.referrer) into a domain.
+ * - empty referrer            => { domain: null }  (direct)
+ * - same-origin as the site   => { domain: '(internal)' }
+ * - external                  => { domain: <hostname> }
  *
  * @param {string} referrer  raw document.referrer value from the beacon payload
  * @param {string} siteOrigin  the configured allowed site origin (for internal detection)
  */
 export function parseReferrer(referrer, siteOrigin) {
   if (!referrer || typeof referrer !== "string") {
-    return { domain: null, path: null };
+    return { domain: null };
   }
   let url;
   try {
     url = new URL(referrer);
   } catch {
-    return { domain: null, path: null };
+    return { domain: null };
   }
 
   let siteHost = null;
@@ -98,6 +98,5 @@ export function parseReferrer(referrer, siteOrigin) {
   }
 
   const domain = siteHost && url.hostname === siteHost ? "(internal)" : url.hostname;
-  const path = url.pathname || "/";
-  return { domain, path };
+  return { domain };
 }

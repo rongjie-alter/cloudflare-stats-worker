@@ -87,7 +87,6 @@ export function toggleTheme() {
 export const DIMENSION_LABELS: Record<Dimension, string> = {
   path: "Path",
   referrer_domain: "Referrer",
-  referrer_path: "Referrer path",
   country: "Country",
   browser: "Browser",
   browser_version: "Browser version",
@@ -112,7 +111,6 @@ export const PANEL_DIMENSIONS: Dimension[] = [
 export const DRAWER_DIMENSIONS: Dimension[] = [
   "path",
   "referrer_domain",
-  "referrer_path",
   "country",
   "browser",
   "browser_version",

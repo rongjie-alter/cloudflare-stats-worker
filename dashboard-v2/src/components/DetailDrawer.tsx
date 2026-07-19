@@ -66,7 +66,6 @@ function DetailChart({ rows }: { rows: AggregateRow[] }) {
 }
 
 const PARENT_DIM: Partial<Record<Dimension, Dimension>> = {
-  referrer_path: "referrer_domain",
   browser_version: "browser",
   os_version: "os",
 };
