@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# DEPRECATED: Use scripts/manage.py instead.
+#   python scripts/manage.py init
 #
 # Cloudflare Stats Worker V2 — guided installer.
 # Creates the D1 database (analytics), applies the schema, builds the dashboard,

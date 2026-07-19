@@ -1,4 +1,6 @@
 #!/bin/bash
+# DEPRECATED: Use scripts/manage.py instead.
+#   python scripts/manage.py deploy [name]
 
 # Cloudflare Stats Worker - One-Click Deploy Script
 # This script automates the deployment process
