@@ -475,7 +475,7 @@ def cmd_init(args):
     print(f"  Config    : deployments/{worker_name}.toml")
     print()
     print("  Next: add the beacon to your site (check deploy output above for the URL):")
-    print(f'    <script defer src="https://<your-worker-domain>/beacon.js"></script>')
+    print(f'    <script defer src="https://<your-worker-domain>/report.js"></script>')
     print()
 
 

@@ -6,7 +6,7 @@
  * country, visitor id) is derived server-side. Cookieless. No dependencies.
  *
  * Usage — add to your site's <head> (or before </body>):
- *   <script defer src="https://stats.example.com/beacon.js"
+ *   <script defer src="https://stats.example.com/report.js"
  *           data-endpoint="https://stats.example.com/api/collect"></script>
  *
  * If data-endpoint is omitted, the script infers it from its own src origin.

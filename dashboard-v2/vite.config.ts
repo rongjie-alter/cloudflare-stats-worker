@@ -12,11 +12,11 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        beacon: resolve(__dirname, "../beacon.js"),
+        beacon: resolve(__dirname, "../report.js"),
       },
       output: {
         entryFileNames: (info) =>
-          info.name === "beacon" ? "beacon.js" : "assets/[name]-[hash].js",
+          info.name === "beacon" ? "report.js" : "assets/[name]-[hash].js",
         manualChunks(id) {
           if (id.includes("node_modules/echarts") || id.includes("node_modules/zrender")) return "echarts";
           if (id.includes("node_modules/ag-grid-community")) return "ag-grid";

@@ -22,7 +22,7 @@
 ## Architecture
 
 ```
-Browser (allowed site) ──beacon.js──► POST /api/collect ──► D1 events_tab (1 row/pageview)
+Browser (allowed site) ──report.js──► POST /api/collect ──► D1 events_tab (1 row/pageview)
 Dashboard SPA at /  ◄── Static Assets ── Worker
   └─ /api/query · /api/timeseries · /api/summary · /api/config ──► D1 (SELECT/GROUP BY)
 Cron (nightly) ──► refresh site_daily_tab, archive+prune >6mo ──► events_monthly_tab
@@ -65,7 +65,7 @@ Edit `wrangler.toml` `[vars]` to set `WORKER_DOMAIN`, `ALLOWED_ORIGIN`, `RATE_LI
 ## Add the beacon to your site
 
 ```html
-<script defer src="https://stats.example.com/beacon.js"></script>
+<script defer src="https://stats.example.com/report.js"></script>
 ```
 
 It POSTs `{ path, referrer }` to `/api/collect` via `navigator.sendBeacon`. Only requests whose `Origin` matches `ALLOWED_ORIGIN` (or `127.0.0.1`/`localhost` in dev) are accepted.

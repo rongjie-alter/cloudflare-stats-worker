@@ -23,7 +23,7 @@ D1 database uses a `_db` suffix; every table uses a `_tab` suffix (`events_tab`,
 | `src/ua.js` | ua-parser-js wrapper: OS/browser/device parse, bot/AI-crawler exclusion, referrer parse |
 | `src/config.js` | Reads `[vars]`, origin/CORS enforcement, `localDay`/`localDayOffset` (Intl, tz-aware) |
 | `schema.sql` | D1 DDL (`dim_*_tab`, `events_tab`, `site_daily_tab`, `events_monthly_tab`; V1 tables kept as legacy baseline) |
-| `beacon.js` | Client beacon (also shipped from `dashboard-v2/public/beacon.js` → `/beacon.js`) |
+| `report.js` | Client beacon (also shipped from `dashboard-v2/public/report.js` → `/report.js`) |
 | `dashboard-v2/` | Vite + preact + AG Grid + ECharts dashboard (English only) |
 | `wrangler.toml` | `[vars]`, `[assets]`, `[triggers]` cron, KV + D1 bindings |
 | `check.js` | Node quick-check against a deployment |
@@ -92,7 +92,7 @@ wrangler d1 execute cloudflare_stats_db --remote --file=schema.sql   # apply sch
 ## Client integration
 
 ```html
-<script defer src="https://stats.example.com/beacon.js"></script>
+<script defer src="https://stats.example.com/report.js"></script>
 ```
 
 The beacon POSTs `{ path, referrer }` to `/api/collect` via `navigator.sendBeacon`.

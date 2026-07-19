@@ -25,7 +25,7 @@ const WORKER_VERSION = "2.0.0";
 
 // --- Cloudflare Access JWT verification ---
 // Opt-in: only active when CF_ACCESS_TEAM_NAME is set in [vars].
-// Protects all routes except /api/collect, /beacon.js, and /health.
+// Protects all routes except /api/collect, /report.js, and /health.
 
 let _jwksCache = null;
 let _jwksCacheExpiry = 0;
@@ -117,7 +117,7 @@ export default {
     // Cloudflare Access JWT verification (opt-in via CF_ACCESS_TEAM_NAME var).
     // Public paths that bypass auth: beacon ingest, beacon script, health check.
     if (env.CF_ACCESS_TEAM_NAME) {
-      const PUBLIC = new Set(["/api/collect", "/beacon.js", "/health"]);
+      const PUBLIC = new Set(["/api/collect", "/report.js", "/health"]);
       if (!PUBLIC.has(pathname)) {
         const token = request.headers.get("CF-Access-JWT-Assertion");
         if (!token) return new Response("Unauthorized", { status: 401 });

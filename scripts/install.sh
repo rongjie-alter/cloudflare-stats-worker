@@ -110,10 +110,10 @@ cat <<SUMMARY
 ${GREEN}Done.${NC}
 Dashboard : https://${WORKER_DOMAIN}/
 Health    : https://${WORKER_DOMAIN}/health
-Beacon    : https://${WORKER_DOMAIN}/beacon.js
+Beacon    : https://${WORKER_DOMAIN}/report.js
 
 Next steps:
   1. Add the beacon to your site (${ALLOWED_ORIGIN}):
-       <script defer src="https://${WORKER_DOMAIN}/beacon.js"></script>
+       <script defer src="https://${WORKER_DOMAIN}/report.js"></script>
   2. Load a page on your site, then open the dashboard to confirm data.
 SUMMARY
