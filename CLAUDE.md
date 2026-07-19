@@ -48,7 +48,6 @@ Read endpoints (`/api/query|timeseries|summary|config`) are cached 30s via the C
 
 ## Configuration (`wrangler.toml [vars]`)
 
-- `WORKER_DOMAIN` — domain hosting the worker
 - `ALLOWED_ORIGIN` — the single website allowed to report (plus `127.0.0.1`/`localhost` dev exception)
 - `RATE_LIMIT_PER_MINUTE` — documented per-IP ingest cap; the **enforced** value is the `[[ratelimits]]` binding's `limit` (keep in sync)
 - `TIMEZONE` — day-boundary timezone (default `Asia/Tokyo`)

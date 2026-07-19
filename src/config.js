@@ -2,7 +2,6 @@
 // Makes the worker reusable for different websites without code changes.
 
 const DEFAULTS = {
-  WORKER_DOMAIN: "",
   ALLOWED_ORIGIN: "",
   RATE_LIMIT_PER_MINUTE: 120,
   TIMEZONE: "Asia/Tokyo",
@@ -10,12 +9,11 @@ const DEFAULTS = {
 
 /**
  * Resolve and validate configuration from env vars.
- * @returns {{workerDomain:string, allowedOrigin:string, rateLimitPerMinute:number, timezone:string}}
+ * @returns {{allowedOrigin:string, rateLimitPerMinute:number, timezone:string}}
  */
 export function getConfig(env) {
   const rateLimit = Number.parseInt(env.RATE_LIMIT_PER_MINUTE ?? "", 10);
   return {
-    workerDomain: (env.WORKER_DOMAIN || DEFAULTS.WORKER_DOMAIN).trim(),
     allowedOrigin: (env.ALLOWED_ORIGIN || DEFAULTS.ALLOWED_ORIGIN).trim().replace(/\/+$/, ""),
     rateLimitPerMinute: Number.isFinite(rateLimit) && rateLimit > 0 ? rateLimit : DEFAULTS.RATE_LIMIT_PER_MINUTE,
     timezone: (env.TIMEZONE || DEFAULTS.TIMEZONE).trim(),
