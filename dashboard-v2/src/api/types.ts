@@ -33,6 +33,7 @@ export interface TimeRange {
 
 export interface AggregateRow {
   key: string;
+  parent?: string;
   value: number;
 }
 

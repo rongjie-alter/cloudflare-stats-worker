@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "preact/hooks";
 import { createGrid } from "ag-grid-community";
-import type { GridApi, GridOptions } from "ag-grid-community";
+import type { GridApi, GridOptions, ColDef } from "ag-grid-community";
 import { gridTheme } from "../grid/agGridSetup";
 import { echarts } from "../charts/echarts";
 import { palette, SERIES_COLORS } from "../charts/theme";
@@ -65,6 +65,12 @@ function DetailChart({ rows }: { rows: AggregateRow[] }) {
   return <div ref={el} style="width:100%;height:360px;" />;
 }
 
+const PARENT_DIM: Partial<Record<Dimension, Dimension>> = {
+  referrer_path: "referrer_domain",
+  browser_version: "browser",
+  os_version: "os",
+};
+
 function DetailGrid({ dimension, rows }: { dimension: Dimension; rows: AggregateRow[] }) {
   const el = useRef<HTMLDivElement>(null);
   const api = useRef<GridApi | null>(null);
@@ -73,39 +79,45 @@ function DetailGrid({ dimension, rows }: { dimension: Dimension; rows: Aggregate
 
   useEffect(() => {
     if (!el.current) return;
+    const parentDim = PARENT_DIM[dimension] as Dimension | undefined;
+    const columnDefs: ColDef<AggregateRow>[] = [
+      ...(parentDim
+        ? [{ headerName: DIMENSION_LABELS[parentDim], field: "parent" as const, flex: 1, filter: true, sortable: true }]
+        : []),
+      { headerName: DIMENSION_LABELS[dimension], field: "key" as const, flex: 2, filter: true, sortable: true },
+      {
+        headerName: metricLabel,
+        field: "value" as const,
+        flex: 1,
+        sortable: true,
+        sort: "desc",
+        valueFormatter: (p) => (p.value ?? 0).toLocaleString(),
+      },
+      {
+        headerName: "",
+        width: 130,
+        sortable: false,
+        filter: false,
+        cellRenderer: (p: any) => {
+          const wrap = document.createElement("div");
+          const mk = (label: string, op: "include" | "exclude", cls: string) => {
+            const b = document.createElement("button");
+            b.textContent = label;
+            b.className = cls;
+            b.style.cssText = "margin-right:4px;cursor:pointer;font-size:11px;padding:1px 6px;";
+            b.onclick = () => addFilter(dimension, op, p.data.key);
+            return b;
+          };
+          wrap.appendChild(mk("Filter", "include", "btn"));
+          wrap.appendChild(mk("Exclude", "exclude", "btn"));
+          return wrap;
+        },
+      },
+    ];
+
     const options: GridOptions<AggregateRow> = {
       theme: gridTheme(theme.value),
-      columnDefs: [
-        { headerName: DIMENSION_LABELS[dimension], field: "key", flex: 2, filter: true, sortable: true },
-        {
-          headerName: metricLabel,
-          field: "value",
-          flex: 1,
-          sortable: true,
-          sort: "desc",
-          valueFormatter: (p) => (p.value ?? 0).toLocaleString(),
-        },
-        {
-          headerName: "",
-          width: 130,
-          sortable: false,
-          filter: false,
-          cellRenderer: (p: any) => {
-            const wrap = document.createElement("div");
-            const mk = (label: string, op: "include" | "exclude", cls: string) => {
-              const b = document.createElement("button");
-              b.textContent = label;
-              b.className = cls;
-              b.style.cssText = "margin-right:4px;cursor:pointer;font-size:11px;padding:1px 6px;";
-              b.onclick = () => addFilter(dimension, op, p.data.key);
-              return b;
-            };
-            wrap.appendChild(mk("Filter", "include", "btn"));
-            wrap.appendChild(mk("Exclude", "exclude", "btn"));
-            return wrap;
-          },
-        },
-      ],
+      columnDefs,
       defaultColDef: { resizable: true },
       rowData: rows,
       pagination: true,
