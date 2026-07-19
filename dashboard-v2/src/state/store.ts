@@ -8,6 +8,7 @@ export const timezone = signal<string>("Asia/Tokyo");
 // --- Core dashboard state ---
 export const metric = signal<Metric>("pageviews");
 export const preset = signal<Preset>("last7d");
+export const customRange = signal<{ from: string; to: string } | null>(null);
 export const filters = signal<Filter[]>([]);
 export const theme = signal<"light" | "dark">(
   (localStorage.getItem("stats-theme") as "light" | "dark") || "dark"
@@ -16,8 +17,12 @@ export const theme = signal<"light" | "dark">(
 // Detail drawer: which dimension is expanded (null = closed).
 export const drawerDimension = signal<Dimension | null>(null);
 
-// Derived time range from the active preset + timezone.
-export const timeRange = computed(() => rangeForPreset(preset.value, timezone.value));
+// Derived time range from the active preset + timezone, or a custom range.
+export const timeRange = computed(() =>
+  customRange.value
+    ? { preset: "custom" as const, ...customRange.value }
+    : rangeForPreset(preset.value, timezone.value)
+);
 
 // A cache/dependency key that changes whenever the query inputs change.
 export const queryKey = computed(() => {
@@ -31,6 +36,11 @@ export function setMetric(m: Metric) {
 
 export function setPreset(p: Preset) {
   preset.value = p;
+  customRange.value = null;
+}
+
+export function setCustomRange(from: string, to: string) {
+  customRange.value = { from, to };
 }
 
 function sameFilter(a: Filter, b: Filter) {

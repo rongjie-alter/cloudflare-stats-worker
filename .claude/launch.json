@@ -6,6 +6,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["wrangler", "dev", "--port", "8787", "--local"],
       "port": 8787
+    },
+    {
+      "name": "dashboard-v2",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "dashboard-v2", "dev", "--port", "5173"],
+      "port": 5173
     }
   ]
 }
