@@ -1,4 +1,4 @@
-/*!
+/*
  * cloudflare-stats-worker beacon (V2)
  *
  * Drop-in pageview tracker. Sends the current path + document.referrer to the

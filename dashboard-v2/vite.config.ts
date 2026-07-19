@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import preact from "@preact/preset-vite";
 
@@ -9,7 +10,13 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     rollupOptions: {
+      input: {
+        main: resolve(__dirname, "index.html"),
+        beacon: resolve(__dirname, "../beacon.js"),
+      },
       output: {
+        entryFileNames: (info) =>
+          info.name === "beacon" ? "beacon.js" : "assets/[name]-[hash].js",
         manualChunks(id) {
           if (id.includes("node_modules/echarts") || id.includes("node_modules/zrender")) return "echarts";
           if (id.includes("node_modules/ag-grid-community")) return "ag-grid";
