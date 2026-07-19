@@ -99,6 +99,14 @@ binding   = "ASSETS"
 [triggers]
 crons = ["30 15 * * *"]
 
+# Per-IP ingest rate limit (atomic, edge-enforced; free plan, no storage cost).
+# period must be 10 or 60; the enforced cap is this \`limit\` (Wrangler v4+ form).
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = $RATE_LIMIT, period = 60 }
+
+# Legacy binding — no longer used at runtime; kept for compatibility.
 [[kv_namespaces]]
 binding = "PAGE_STATS"
 id = "$KV_ID"

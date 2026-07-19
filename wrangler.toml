@@ -7,8 +7,16 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 WORKER_DOMAIN         = "stats.example.com"          # domain hosting this worker
 ALLOWED_ORIGIN        = "https://blog.example.com"   # the ONE website allowed to report (+ 127.0.0.1/localhost for dev)
-RATE_LIMIT_PER_MINUTE = "120"                          # per-IP ingest rate limit
+RATE_LIMIT_PER_MINUTE = "120"                          # documented per-IP ingest cap; the ENFORCED value is the [[ratelimits]] `limit` below — keep them in sync
 TIMEZONE              = "Asia/Tokyo"                   # day-boundary timezone (default: Japan)
+
+# Per-IP ingest rate limit — atomic, edge-enforced via the Workers Rate Limiting
+# binding (free plan; no storage cost). Replaces the old non-atomic KV bucket.
+# `period` must be 10 or 60 (seconds); limits are per-Cloudflare-location (colo).
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 120, period = 60 }
 
 # Dashboard SPA (built by: pnpm --dir dashboard-v2 build)
 [assets]
@@ -20,7 +28,9 @@ binding   = "ASSETS"
 [triggers]
 crons = ["30 15 * * *"]
 
-# KV namespace — used ONLY for per-IP rate-limit buckets in V2.
+# KV namespace — legacy binding, no longer used at runtime (rate limiting moved
+# to the [[ratelimits]] binding above). Kept bound so existing deploy scripts
+# and namespaces stay valid; safe to remove if you re-provision from scratch.
 # Create with: wrangler kv namespace create PAGE_STATS
 [[kv_namespaces]]
 binding = "PAGE_STATS"

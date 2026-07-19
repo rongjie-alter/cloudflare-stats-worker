@@ -8,7 +8,7 @@ A single worker (`src/index.js`) handles the ingest + query API and serves the d
 
 **Storage:**
 - **D1 (`DB`, database `cloudflare_stats_db`)** — single source of truth. Raw one-row-per-pageview fact table `events_tab` (hot 6-month window) + dictionary `dim_*_tab` lookup tables + `site_daily_tab` rollup + `events_monthly_tab` archive.
-- **KV (`PAGE_STATS`)** — used **only** for per-IP rate-limit buckets.
+- **KV (`PAGE_STATS`)** — legacy binding, **no longer used at runtime** (kept bound for deploy-script compatibility). Per-IP rate limiting moved to the Workers Rate Limiting binding (`RATE_LIMITER`, atomic/edge-enforced).
 
 **Metrics:** PV = `COUNT(*)`, UV = `COUNT(DISTINCT visitor_id)` over `events_tab`. UV is not additive across dimensions, which is why raw `visitor_id` rows are kept (enables exact arbitrary-dimension UV).
 
@@ -51,8 +51,10 @@ Read endpoints (`/api/query|timeseries|summary|config`) are cached 30s via the C
 
 - `WORKER_DOMAIN` — domain hosting the worker
 - `ALLOWED_ORIGIN` — the single website allowed to report (plus `127.0.0.1`/`localhost` dev exception)
-- `RATE_LIMIT_PER_MINUTE` — per-IP ingest cap
+- `RATE_LIMIT_PER_MINUTE` — documented per-IP ingest cap; the **enforced** value is the `[[ratelimits]]` binding's `limit` (keep in sync)
 - `TIMEZONE` — day-boundary timezone (default `Asia/Tokyo`)
+
+Per-IP ingest rate limiting is enforced by the Workers **Rate Limiting binding** (`RATE_LIMITER` in `wrangler.toml`, atomic per-colo). IP is taken **only** from `CF-Connecting-IP` (never client-supplied `x-forwarded-for`).
 
 ## Ingestion & bot exclusion
 

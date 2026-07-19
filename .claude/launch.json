@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "worker",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["wrangler", "dev", "--port", "8787", "--local"],
+      "runtimeExecutable": "wrangler",
+      "runtimeArgs": ["dev", "--port", "8787", "--local"],
       "port": 8787
     },
     {
