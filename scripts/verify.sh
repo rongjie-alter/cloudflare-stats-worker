@@ -27,14 +27,14 @@ TZ=$(curl -sS "$BASE_URL/api/config" | jq -r '.timezone')
 ok "timezone=$TZ"
 
 info "3. Ingest a test pageview (Origin: dev exception)"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/collect" \
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/send" \
   -H "Origin: http://127.0.0.1" -H "User-Agent: $UA" -H "Content-Type: application/json" \
   -d '{"path":"/_verify/","referrer":"https://www.google.com/"}')
 [[ "$CODE" == "204" ]] || fail "collect returned $CODE (expected 204)"
 ok "collect accepted"
 
 info "4. Disallowed origin is rejected"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/collect" \
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/send" \
   -H "Origin: https://evil.example" -H "User-Agent: $UA" -H "Content-Type: application/json" \
   -d '{"path":"/","referrer":""}')
 [[ "$CODE" == "403" ]] || fail "disallowed origin returned $CODE (expected 403)"

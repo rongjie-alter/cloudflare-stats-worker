@@ -31,7 +31,7 @@ D1 database uses a `_db` suffix; every table uses a `_tab` suffix (`events_tab`,
 ## API routes
 
 ```
-POST /api/collect      Ingest one pageview (beacon). Origin-restricted; bots excluded. -> 204
+POST /api/send      Ingest one pageview (beacon). Origin-restricted; bots excluded. -> 204
 GET  /api/query        Grouped breakdown: metric, from/to, group_by, filter, exclude, limit
 GET  /api/timeseries   Daily trend: metric, from/to, filters
 GET  /api/summary      Headline cards (today / 7d / 30d / all-time)
@@ -56,7 +56,7 @@ Per-IP ingest rate limiting is enforced by the Workers **Rate Limiting binding**
 
 ## Ingestion & bot exclusion
 
-`/api/collect` reads UA (server-side), IP, and `request.cf.country`; referrer comes from the beacon payload (`document.referrer`). Bots/AI crawlers are always dropped (`src/ua.js`: regex + ua-parser-js Crawlers extension). Visitor id = first 13 hex of `SHA-256(ip|userAgent)` as a 52-bit int. The event write runs in `ctx.waitUntil`. Dimension ids are resolved via an isolate-global get-or-create cache.
+`/api/send` reads UA (server-side), IP, and `request.cf.country`; referrer comes from the beacon payload (`document.referrer`). Bots/AI crawlers are always dropped (`src/ua.js`: regex + ua-parser-js Crawlers extension). Visitor id = first 13 hex of `SHA-256(ip|userAgent)` as a 52-bit int. The event write runs in `ctx.waitUntil`. Dimension ids are resolved via an isolate-global get-or-create cache.
 
 ## Retention & rollup (cron)
 
@@ -95,7 +95,7 @@ wrangler d1 execute cloudflare_stats_db --remote --file=schema.sql   # apply sch
 <script defer src="https://stats.example.com/report.js"></script>
 ```
 
-The beacon POSTs `{ path, referrer }` to `/api/collect` via `navigator.sendBeacon`.
+The beacon POSTs `{ path, referrer }` to `/api/send` via `XMLHttpRequest` (a single transport — `sendBeacon` is avoided because its `true` return only means "queued", so a blocker that neuters it looks like success).
 
 ## Notes
 

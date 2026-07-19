@@ -22,7 +22,7 @@
 ## Architecture
 
 ```
-Browser (allowed site) ──report.js──► POST /api/collect ──► D1 events_tab (1 row/pageview)
+Browser (allowed site) ──report.js──► POST /api/send ──► D1 events_tab (1 row/pageview)
 Dashboard SPA at /  ◄── Static Assets ── Worker
   └─ /api/query · /api/timeseries · /api/summary · /api/config ──► D1 (SELECT/GROUP BY)
 Cron (nightly) ──► refresh site_daily_tab, archive+prune >6mo ──► events_monthly_tab
@@ -68,7 +68,7 @@ Edit `wrangler.toml` `[vars]` to set `WORKER_DOMAIN`, `ALLOWED_ORIGIN`, `RATE_LI
 <script defer src="https://stats.example.com/report.js"></script>
 ```
 
-It POSTs `{ path, referrer }` to `/api/collect` via `navigator.sendBeacon`. Only requests whose `Origin` matches `ALLOWED_ORIGIN` (or `127.0.0.1`/`localhost` in dev) are accepted.
+It POSTs `{ path, referrer }` to `/api/send` via `XMLHttpRequest`. Only requests whose `Origin` matches `ALLOWED_ORIGIN` (or `127.0.0.1`/`localhost` in dev) are accepted.
 
 ---
 
@@ -76,7 +76,7 @@ It POSTs `{ path, referrer }` to `/api/collect` via `navigator.sendBeacon`. Only
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/collect` | Ingest one pageview. Origin-restricted; bots dropped. → `204` |
+| `POST` | `/api/send` | Ingest one pageview. Origin-restricted; bots dropped. → `204` |
 | `GET` | `/api/query` | Grouped breakdown: `metric`, `from`, `to`, `group_by`, `filter`, `exclude`, `limit` |
 | `GET` | `/api/timeseries` | Daily trend: `metric`, `from`, `to`, `filter`, `exclude` |
 | `GET` | `/api/summary` | Headline cards (today / 7d / 30d / all-time) |

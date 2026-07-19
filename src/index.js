@@ -3,7 +3,7 @@
 // D1 is the single source of truth (raw event fact table `events_tab`). The
 // dashboard SPA is served from Workers Static Assets (env.ASSETS) at `/`.
 //
-//   POST /api/collect     ingest one pageview (beacon)
+//   POST /api/send     ingest one pageview (beacon)
 //   GET  /api/query       grouped breakdown by any dimension
 //   GET  /api/timeseries  daily trend
 //   GET  /api/summary     headline cards (today / 7d / 30d / all-time)
@@ -25,7 +25,7 @@ const WORKER_VERSION = "2.0.0";
 
 // --- Cloudflare Access JWT verification ---
 // Opt-in: only active when CF_ACCESS_TEAM_NAME is set in [vars].
-// Protects all routes except /api/collect, /report.js, and /health.
+// Protects all routes except /api/send, /report.js, and /health.
 
 let _jwksCache = null;
 let _jwksCacheExpiry = 0;
@@ -117,7 +117,7 @@ export default {
     // Cloudflare Access JWT verification (opt-in via CF_ACCESS_TEAM_NAME var).
     // Public paths that bypass auth: beacon ingest, beacon script, health check.
     if (env.CF_ACCESS_TEAM_NAME) {
-      const PUBLIC = new Set(["/api/collect", "/report.js", "/health"]);
+      const PUBLIC = new Set(["/api/send", "/report.js", "/health"]);
       if (!PUBLIC.has(pathname)) {
         const token = request.headers.get("CF-Access-JWT-Assertion");
         if (!token) return new Response("Unauthorized", { status: 401 });
@@ -141,7 +141,7 @@ export default {
     let response;
     try {
       switch (pathname) {
-        case "/api/collect":
+        case "/api/send":
           response = await handleCollect(request, env, ctx, config);
           break;
         case "/api/query":

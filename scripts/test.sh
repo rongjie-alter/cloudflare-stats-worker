@@ -26,20 +26,20 @@ DS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$BASE_URL/")
 step "Config (/api/config)"
 if echo "$(http_get "$BASE_URL/api/config")" | jq -e '.timezone|type=="string"' >/dev/null 2>&1; then mark_pass "timezone present"; else mark_fail "no timezone"; fi
 
-step "Ingest (POST /api/collect, dev origin)"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/collect" \
+step "Ingest (POST /api/send, dev origin)"
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/send" \
   -H "Origin: http://127.0.0.1" -H "User-Agent: $UA" -H "Content-Type: application/json" \
   -d '{"path":"/_smoke/","referrer":"https://news.ycombinator.com/"}')
 [ "$CODE" = "204" ] && mark_pass "collect 204" || mark_fail "collect $CODE"
 
-step "Bot excluded (POST /api/collect, GPTBot)"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/collect" \
+step "Bot excluded (POST /api/send, GPTBot)"
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/send" \
   -H "Origin: http://127.0.0.1" -H "User-Agent: GPTBot/1.1" -H "Content-Type: application/json" \
   -d '{"path":"/_smoke/","referrer":""}')
 [ "$CODE" = "204" ] && mark_pass "bot 204 (no row expected)" || mark_fail "bot $CODE"
 
-step "Origin enforcement (POST /api/collect, bad origin)"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/collect" \
+step "Origin enforcement (POST /api/send, bad origin)"
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/send" \
   -H "Origin: https://evil.example" -H "User-Agent: $UA" -H "Content-Type: application/json" -d '{"path":"/"}')
 [ "$CODE" = "403" ] && mark_pass "403 rejected" || mark_fail "expected 403, got $CODE"
 
