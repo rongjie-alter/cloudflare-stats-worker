@@ -3,10 +3,12 @@
 Cloudflare Stats Worker — deployment manager.
 
 Usage:
-  python scripts/manage.py init              # First-time setup for a new site
-  python scripts/manage.py deploy [name]     # Deploy an existing site
-  python scripts/manage.py deploy --all      # Deploy all sites
-  python scripts/manage.py list              # List configured sites
+  python scripts/manage.py init                    # First-time setup for a new site
+  python scripts/manage.py deploy [name]           # Deploy an existing site
+  python scripts/manage.py deploy --all            # Deploy all sites
+  python scripts/manage.py list                    # List configured sites
+  python scripts/manage.py migrate <file> [name]   # Run a D1 SQL migration (remote)
+  python scripts/manage.py migrate <file> --all    # Run a migration on all sites
 
 Replaces: scripts/install.sh, scripts/deploy.sh
 """
@@ -27,6 +29,7 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEPLOYMENTS_DIR = ROOT_DIR / "deployments"
+MIGRATIONS_DIR = ROOT_DIR / "migrations"
 ROOT_WRANGLER = ROOT_DIR / "wrangler.toml"
 SCHEMA_SQL = ROOT_DIR / "schema.sql"
 DASHBOARD_DIR = ROOT_DIR / "dashboard-v2"
@@ -336,6 +339,34 @@ def apply_schema(db_name):
     ok("Schema applied")
 
 
+def resolve_migration_path(name):
+    """Resolve a migration file. Accepts a path (relative/absolute) or a bare
+    name resolved under migrations/ (with or without a .sql suffix)."""
+    direct = Path(name)
+    if direct.is_file():
+        return direct.resolve()
+    for candidate in (MIGRATIONS_DIR / name, MIGRATIONS_DIR / f"{name}.sql"):
+        if candidate.is_file():
+            return candidate
+    raise ManageError(
+        f"Migration file not found: {name}\n"
+        f"  Looked in: {name}, {MIGRATIONS_DIR / name}, {MIGRATIONS_DIR / (name + '.sql')}"
+    )
+
+
+def apply_migration(db_name, migration_path):
+    """Apply a SQL migration file to a remote D1 database."""
+    info(f"Applying {migration_path.name} to D1 '{db_name}' (remote)...")
+    rc, _ = run_streaming([
+        "wrangler", "d1", "execute", db_name,
+        "--remote",
+        f"--file={migration_path}",
+    ])
+    if rc != 0:
+        raise ManageError(f"Failed to apply migration to '{db_name}'")
+    ok("Migration applied")
+
+
 # ---------------------------------------------------------------------------
 # Dashboard build
 # ---------------------------------------------------------------------------
@@ -483,6 +514,42 @@ def cmd_init(args):
 # Command: deploy
 # ---------------------------------------------------------------------------
 
+def _resolve_single_config(name):
+    """Resolve one deployment config path. Prompts interactively when name is None."""
+    configs = list_deployment_files()
+    if name is not None:
+        config_path = DEPLOYMENTS_DIR / f"{name}.toml"
+        if not config_path.exists():
+            raise ManageError(
+                f"deployments/{name}.toml not found\n"
+                "  Run: python scripts/manage.py list"
+            )
+        return config_path
+
+    if not configs:
+        raise ManageError(
+            "No deployments found in deployments/\n"
+            "  Run: python scripts/manage.py init"
+        )
+    print()
+    print(bold("Available deployments:"))
+    for i, p in enumerate(configs, 1):
+        content = p.read_text(encoding="utf-8")
+        origin = read_toml_value(content, "ALLOWED_ORIGIN") or ""
+        print(f"  {i}. {p.stem:<35} {origin}")
+    print()
+    choice = input("  Enter number or name [1]: ").strip() or "1"
+    if choice.isdigit():
+        idx = int(choice) - 1
+        if not (0 <= idx < len(configs)):
+            raise ManageError(f"Invalid choice: {choice}")
+        return configs[idx]
+    config_path = DEPLOYMENTS_DIR / f"{choice}.toml"
+    if not config_path.exists():
+        raise ManageError(f"No deployment found for '{choice}'")
+    return config_path
+
+
 def _deploy_one(config_path, apply_schema_flag):
     """Deploy a single site from its config file. Returns True on success."""
     content = config_path.read_text(encoding="utf-8")
@@ -524,37 +591,7 @@ def cmd_deploy(args):
         return
 
     # Single deployment
-    name = args.name
-    if name is None:
-        if not configs:
-            raise ManageError(
-                "No deployments found in deployments/\n"
-                "  Run: python scripts/manage.py init"
-            )
-        print()
-        print(bold("Available deployments:"))
-        for i, p in enumerate(configs, 1):
-            content = p.read_text(encoding="utf-8")
-            origin = read_toml_value(content, "ALLOWED_ORIGIN") or ""
-            print(f"  {i}. {p.stem:<35} {origin}")
-        print()
-        choice = input("  Enter number or name [1]: ").strip() or "1"
-        if choice.isdigit():
-            idx = int(choice) - 1
-            if not (0 <= idx < len(configs)):
-                raise ManageError(f"Invalid choice: {choice}")
-            config_path = configs[idx]
-        else:
-            config_path = DEPLOYMENTS_DIR / f"{choice}.toml"
-            if not config_path.exists():
-                raise ManageError(f"No deployment found for '{choice}'")
-    else:
-        config_path = DEPLOYMENTS_DIR / f"{name}.toml"
-        if not config_path.exists():
-            raise ManageError(
-                f"deployments/{name}.toml not found\n"
-                "  Run: python scripts/manage.py list"
-            )
+    config_path = _resolve_single_config(args.name)
 
     build_dashboard()
     success = _deploy_one(config_path, args.schema)
@@ -564,6 +601,56 @@ def cmd_deploy(args):
     print()
     print(green("Done."))
     print()
+
+
+# ---------------------------------------------------------------------------
+# Command: migrate
+# ---------------------------------------------------------------------------
+
+def cmd_migrate(args):
+    migration_path = resolve_migration_path(args.file)
+
+    if args.all:
+        targets = list_deployment_files()
+        if not targets:
+            raise ManageError(
+                "No deployments found in deployments/\n"
+                "  Run: python scripts/manage.py init"
+            )
+    else:
+        targets = [_resolve_single_config(args.name)]
+
+    # Migrations run against remote (production) D1 — confirm before touching data.
+    print()
+    warn(f"About to run migration {bold(migration_path.name)} against REMOTE D1 for:")
+    for p in targets:
+        db = read_toml_value(p.read_text(encoding="utf-8"), "database_name") or "(unknown)"
+        print(f"    {p.stem:<35} -> {db}")
+    print()
+    if not args.yes and not _prompt_yn("This modifies production data. Continue?", default=False):
+        raise ManageError("Aborted.")
+
+    results = []
+    for p in targets:
+        db_name = read_toml_value(p.read_text(encoding="utf-8"), "database_name")
+        if not db_name:
+            warn(f"{p.stem}: no database_name in config — skipping")
+            results.append((p.stem, False))
+            continue
+        try:
+            apply_migration(db_name, migration_path)
+            results.append((p.stem, True))
+        except ManageError as e:
+            warn(str(e))
+            results.append((p.stem, False))
+
+    print()
+    print(bold("Migration results:"))
+    for name, success in results:
+        status = green("OK") if success else red("FAILED")
+        print(f"  {status}  {name}")
+    if any(not s for _, s in results):
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -628,6 +715,25 @@ def main():
         help="Also apply schema.sql before deploying",
     )
 
+    # migrate
+    p_migrate = sub.add_parser("migrate", help="Run a D1 SQL migration against a deployment (remote)")
+    p_migrate.add_argument(
+        "file",
+        help="Migration SQL file: a path, or a name resolved under migrations/",
+    )
+    p_migrate.add_argument(
+        "name", nargs="?", default=None,
+        help="Deployment name (stem of deployments/<name>.toml). Omit to pick interactively.",
+    )
+    p_migrate.add_argument(
+        "--all", action="store_true",
+        help="Apply the migration to all sites in deployments/",
+    )
+    p_migrate.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip the confirmation prompt",
+    )
+
     # list
     sub.add_parser("list", help="List configured sites")
 
@@ -638,6 +744,8 @@ def main():
             cmd_init(args)
         elif args.command == "deploy":
             cmd_deploy(args)
+        elif args.command == "migrate":
+            cmd_migrate(args)
         elif args.command == "list":
             cmd_list(args)
     except ManageError as e:
