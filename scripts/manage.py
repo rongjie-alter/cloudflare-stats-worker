@@ -8,6 +8,7 @@ Usage:
   python scripts/manage.py deploy --all            # Deploy all sites
   python scripts/manage.py list                    # List configured sites
   python scripts/manage.py migrate <file> [name]   # Run a D1 SQL migration (remote)
+  python scripts/manage.py migrate <file> --local  # Run against the local D1
   python scripts/manage.py migrate <file> --all    # Run a migration on all sites
 
 Replaces: scripts/install.sh, scripts/deploy.sh
@@ -354,12 +355,18 @@ def resolve_migration_path(name):
     )
 
 
-def apply_migration(db_name, migration_path):
-    """Apply a SQL migration file to a remote D1 database."""
-    info(f"Applying {migration_path.name} to D1 '{db_name}' (remote)...")
+def apply_migration(db_name, migration_path, config_path, remote=True):
+    """Apply a SQL migration file to a D1 database (remote by default, or local).
+
+    Passes --config so wrangler resolves the D1 binding from the deployment's
+    own config — required for --local (which maps the name to local SQLite state
+    via the binding) and harmless for --remote."""
+    target = "remote" if remote else "local"
+    info(f"Applying {migration_path.name} to D1 '{db_name}' ({target})...")
     rc, _ = run_streaming([
         "wrangler", "d1", "execute", db_name,
-        "--remote",
+        "--config", str(config_path),
+        "--remote" if remote else "--local",
         f"--file={migration_path}",
     ])
     if rc != 0:
@@ -609,6 +616,7 @@ def cmd_deploy(args):
 
 def cmd_migrate(args):
     migration_path = resolve_migration_path(args.file)
+    remote = not args.local
 
     if args.all:
         targets = list_deployment_files()
@@ -620,14 +628,17 @@ def cmd_migrate(args):
     else:
         targets = [_resolve_single_config(args.name)]
 
-    # Migrations run against remote (production) D1 — confirm before touching data.
+    where = "REMOTE" if remote else "LOCAL"
     print()
-    warn(f"About to run migration {bold(migration_path.name)} against REMOTE D1 for:")
+    (warn if remote else info)(
+        f"About to run migration {bold(migration_path.name)} against {where} D1 for:"
+    )
     for p in targets:
         db = read_toml_value(p.read_text(encoding="utf-8"), "database_name") or "(unknown)"
         print(f"    {p.stem:<35} -> {db}")
     print()
-    if not args.yes and not _prompt_yn("This modifies production data. Continue?", default=False):
+    # Only the remote path touches production data, so only it needs confirming.
+    if remote and not args.yes and not _prompt_yn("This modifies production data. Continue?", default=False):
         raise ManageError("Aborted.")
 
     results = []
@@ -638,7 +649,7 @@ def cmd_migrate(args):
             results.append((p.stem, False))
             continue
         try:
-            apply_migration(db_name, migration_path)
+            apply_migration(db_name, migration_path, p, remote=remote)
             results.append((p.stem, True))
         except ManageError as e:
             warn(str(e))
@@ -730,8 +741,12 @@ def main():
         help="Apply the migration to all sites in deployments/",
     )
     p_migrate.add_argument(
+        "--local", action="store_true",
+        help="Run against the local D1 instead of remote (no confirmation needed)",
+    )
+    p_migrate.add_argument(
         "-y", "--yes", action="store_true",
-        help="Skip the confirmation prompt",
+        help="Skip the confirmation prompt (remote only)",
     )
 
     # list
