@@ -37,14 +37,28 @@ See [`CLAUDE.md`](CLAUDE.md) for the full schema, key files, and conventions.
 
 ## Quick start
 
-Prerequisites: Node 18+, **pnpm**, a Cloudflare account, `wrangler`.
+Prerequisites: Python 3.8+, Node 18+, **pnpm**, a Cloudflare account, `wrangler`.
 
 ```bash
 git clone <this-repo> && cd cloudflare-stats-worker
-bash scripts/install.sh      # interactive: creates D1, applies schema, builds dashboard, deploys
+python scripts/manage.py init    # interactive: creates D1, applies schema, builds dashboard, deploys
 ```
 
-The installer prompts for the worker name, worker domain, allowed website origin, rate limit, and timezone, then writes `wrangler.toml` and deploys.
+The script prompts for the worker name, allowed website origin, rate limit, and timezone, then writes `deployments/<name>.toml` and deploys.
+
+### manage.py reference
+
+```bash
+python scripts/manage.py init                    # First-time setup for a new site
+python scripts/manage.py deploy [name]           # Rebuild dashboard and deploy an existing site
+python scripts/manage.py deploy --all            # Deploy all sites
+python scripts/manage.py list                    # List configured sites
+python scripts/manage.py migrate <file> [name]   # Run a D1 SQL migration (remote)
+python scripts/manage.py migrate <file> --local  # Run against the local D1
+python scripts/manage.py migrate <file> --all    # Run a migration on all sites
+```
+
+Each site's config lives in `deployments/<name>.toml` (managed by the script; do not edit manually).
 
 ### Manual setup
 
