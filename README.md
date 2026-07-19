@@ -13,7 +13,7 @@
 - **Edge-native** — one Worker serves the ingest + query API *and* the dashboard SPA (Workers Static Assets).
 - **Rich dimensions** — OS, OS version, browser, browser version, device type/vendor/model, country, referrer (domain + path).
 - **Cookieless & bot-free** — visitor id = truncated `SHA-256(ip|ua)`; bots/AI crawlers are always excluded (`ua-parser-js`).
-- **D1 as source of truth** — raw event fact table gives exact PV **and** UV under arbitrary filtering; KV only holds rate-limit buckets.
+- **D1 as source of truth** — raw event fact table gives exact PV **and** UV under arbitrary filtering.
 - **Retention that fits** — day-level detail for 6 months, auto-archived to month-level by a nightly cron; designed to stay well under 500 MB at 10k pv/day.
 - **Reusable** — one site per deployment via config: worker domain, allowed origin, rate limit, timezone.
 
@@ -26,7 +26,6 @@ Browser (allowed site) ──beacon.js──► POST /api/collect ──► D1 e
 Dashboard SPA at /  ◄── Static Assets ── Worker
   └─ /api/query · /api/timeseries · /api/summary · /api/config ──► D1 (SELECT/GROUP BY)
 Cron (nightly) ──► refresh site_daily_tab, archive+prune >6mo ──► events_monthly_tab
-KV PAGE_STATS ── rate-limit buckets only
 ```
 
 - **PV** = `COUNT(*)`, **UV** = `COUNT(DISTINCT visitor_id)` over `events_tab`.
@@ -42,7 +41,7 @@ Prerequisites: Node 18+, **pnpm**, a Cloudflare account, `wrangler`.
 
 ```bash
 git clone <this-repo> && cd cloudflare-stats-worker
-bash scripts/install.sh      # interactive: creates KV + D1, applies schema, builds dashboard, deploys
+bash scripts/install.sh      # interactive: creates D1, applies schema, builds dashboard, deploys
 ```
 
 The installer prompts for the worker name, worker domain, allowed website origin, rate limit, and timezone, then writes `wrangler.toml` and deploys.
@@ -51,7 +50,6 @@ The installer prompts for the worker name, worker domain, allowed website origin
 
 ```bash
 pnpm install                              # root deps (ua-parser-js, wrangler)
-wrangler kv namespace create PAGE_STATS   # -> put id in wrangler.toml
 wrangler d1 create cloudflare_stats_db    # -> put database_id in wrangler.toml
 wrangler d1 execute cloudflare_stats_db --remote --file=schema.sql
 

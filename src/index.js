@@ -1,8 +1,7 @@
 // cloudflare-stats-worker V2 — dimensional analytics on Cloudflare Workers.
 //
-// D1 is the single source of truth (raw event fact table `events_tab`); KV
-// (`PAGE_STATS`) is used only for per-IP rate-limit buckets. The dashboard SPA
-// is served from Workers Static Assets (env.ASSETS) at `/`.
+// D1 is the single source of truth (raw event fact table `events_tab`). The
+// dashboard SPA is served from Workers Static Assets (env.ASSETS) at `/`.
 //
 //   POST /api/collect     ingest one pageview (beacon)
 //   GET  /api/query       grouped breakdown by any dimension

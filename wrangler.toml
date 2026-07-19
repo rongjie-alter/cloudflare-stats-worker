@@ -28,15 +28,6 @@ binding   = "ASSETS"
 [triggers]
 crons = ["30 15 * * *"]
 
-# KV namespace — legacy binding, no longer used at runtime (rate limiting moved
-# to the [[ratelimits]] binding above). Kept bound so existing deploy scripts
-# and namespaces stay valid; safe to remove if you re-provision from scratch.
-# Create with: wrangler kv namespace create PAGE_STATS
-[[kv_namespaces]]
-binding = "PAGE_STATS"
-id = "89eadc7ef04244c3834c1b97f326b075"
-preview_id = "89eadc7ef04244c3834c1b97f326b075"
-
 # D1 database — single source of truth for all analytics.
 # Create with: wrangler d1 create cloudflare_stats_db
 [[d1_databases]]

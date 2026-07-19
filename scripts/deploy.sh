@@ -22,7 +22,7 @@ EOF
 echo -e "${NC}"
 
 # Check if wrangler is installed
-echo -e "${YELLOW}[1/7] Checking Wrangler installation...${NC}"
+echo -e "${YELLOW}[1/5] Checking Wrangler installation...${NC}"
 if ! command -v wrangler &> /dev/null; then
     echo -e "${RED}XX Wrangler not found!${NC}"
     echo -e "${YELLOW}Installing Wrangler globally...${NC}"
@@ -34,7 +34,7 @@ else
 fi
 
 # Login to Cloudflare
-echo -e "\n${YELLOW}[2/7] Logging in to Cloudflare...${NC}"
+echo -e "\n${YELLOW}[2/5] Logging in to Cloudflare...${NC}"
 if wrangler whoami &> /dev/null; then
     ACCOUNT_INFO=$(wrangler whoami 2>&1)
     echo -e "${GREEN}OK Already logged in${NC}"
@@ -45,39 +45,8 @@ else
     echo -e "${GREEN}OK Login successful${NC}"
 fi
 
-# Create KV namespace for production
-echo -e "\n${YELLOW}[3/7] Creating KV namespace (production)...${NC}"
-KV_OUTPUT=$(wrangler kv namespace create PAGE_STATS 2>&1)
-echo "$KV_OUTPUT"
-
-if echo "$KV_OUTPUT" | grep -q "already exists"; then
-    echo -e "${YELLOW}! Namespace already exists, fetching existing ID...${NC}"
-    KV_ID=$(wrangler kv namespace list | jq -r '.[] | select(.title=="PAGE_STATS") | .id' | head -1)
-else
-    KV_ID=$(echo "$KV_OUTPUT" | grep -oP 'id = "\K[^"]+' || echo "")
-fi
-
-if [ -z "$KV_ID" ]; then
-    echo -e "${RED}XX Failed to get KV namespace ID${NC}"
-    exit 1
-fi
-echo -e "${GREEN}OK Production KV ID: ${KV_ID}${NC}"
-
-# Create KV namespace for preview
-echo -e "\n${YELLOW}[4/7] Creating KV namespace (preview)...${NC}"
-PREVIEW_OUTPUT=$(wrangler kv namespace create PAGE_STATS --preview 2>&1)
-echo "$PREVIEW_OUTPUT"
-
-if echo "$PREVIEW_OUTPUT" | grep -q "already exists"; then
-    echo -e "${YELLOW}! Preview namespace already exists, using production ID${NC}"
-    PREVIEW_ID="$KV_ID"
-else
-    PREVIEW_ID=$(echo "$PREVIEW_OUTPUT" | grep -oP 'preview_id = "\K[^"]+' || echo "$KV_ID")
-fi
-echo -e "${GREEN}OK Preview KV ID: ${PREVIEW_ID}${NC}"
-
 # Update wrangler.toml
-echo -e "\n${YELLOW}[5/7] Updating wrangler.toml...${NC}"
+echo -e "\n${YELLOW}[3/5] Updating wrangler.toml...${NC}"
 if [ ! -f "wrangler.toml" ]; then
     echo -e "${RED}XX wrangler.toml not found!${NC}"
     exit 1
@@ -86,23 +55,12 @@ fi
 # Backup original
 cp wrangler.toml wrangler.toml.backup
 
-# Update KV IDs using sed (cross-platform compatible)
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS
-    sed -i '' "s/id = \".*\" # KV namespace ID/id = \"$KV_ID\" # KV namespace ID/" wrangler.toml || \
-    sed -i '' "s/id = \".*\"/id = \"$KV_ID\"/" wrangler.toml
-    sed -i '' "s/preview_id = \".*\"/preview_id = \"$PREVIEW_ID\"/" wrangler.toml
-else
-    # Linux
-    sed -i "s/id = \".*\" # KV namespace ID/id = \"$KV_ID\" # KV namespace ID/" wrangler.toml || \
-    sed -i "s/id = \".*\"/id = \"$KV_ID\"/" wrangler.toml
-    sed -i "s/preview_id = \".*\"/preview_id = \"$PREVIEW_ID\"/" wrangler.toml
-fi
+echo -e "${YELLOW}Note: KV PAGE_STATS binding has been removed; no KV IDs to update.${NC}"
 
 echo -e "${GREEN}OK wrangler.toml updated${NC}"
 
 # Ask about D1 setup
-echo -e "\n${YELLOW}[6/7] Optional: D1 Database for Top Posts${NC}"
+echo -e "\n${YELLOW}[4/5] Optional: D1 Database for Top Posts${NC}"
 read -p "$(echo -e ${YELLOW}Do you want to enable D1 for /api/top endpoint? [y/N]: ${NC})" -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -142,7 +100,7 @@ else
 fi
 
 # Deploy
-echo -e "\n${YELLOW}[7/7] Deploying to Cloudflare...${NC}"
+echo -e "\n${YELLOW}[5/5] Deploying to Cloudflare...${NC}"
 DEPLOY_OUTPUT=$(wrangler deploy 2>&1)
 echo "$DEPLOY_OUTPUT"
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Cloudflare Stats Worker V2 — guided installer.
-# Creates the KV namespace (rate-limit buckets) and D1 database (analytics),
-# applies the schema, builds the dashboard, writes wrangler.toml, and deploys.
+# Creates the D1 database (analytics), applies the schema, builds the dashboard,
+# writes wrangler.toml, and deploys.
 # Safe to re-run; existing resources are reused.
 
 set -Eeuo pipefail
@@ -39,20 +39,6 @@ TIMEZONE=${TIMEZONE:-Asia/Tokyo}
 
 COMPAT_DATE=$(grep '^compatibility_date' wrangler.toml 2>/dev/null | awk -F'"' '{print $2}')
 COMPAT_DATE=${COMPAT_DATE:-$(date +%Y-%m-%d)}
-
-# --- KV namespace (rate-limit buckets) ------------------------------------------------
-KV_TITLE="${WORKER_NAME//[^A-Za-z0-9_-]/}_PAGE_STATS"
-info "Creating KV namespace (${KV_TITLE})..."
-KV_OUTPUT=$(wrangler kv namespace create "$KV_TITLE" 2>&1 || true)
-if echo "$KV_OUTPUT" | grep -qi "already exists"; then
-  warn "Namespace already exists. Reusing existing ID."
-  KV_ID=$(wrangler kv namespace list 2>/dev/null | awk -v t="$KV_TITLE" '$0 ~ t {print $2}' | head -1)
-  [[ -n "$KV_ID" ]] || read -rp "Enter existing KV namespace id: " KV_ID
-else
-  KV_ID=$(echo "$KV_OUTPUT" | awk -F'"' '/id =/ {print $2}' | head -1)
-fi
-[[ -n "$KV_ID" ]] || fail "KV namespace id missing"
-ok "KV bound: $KV_ID"
 
 # --- D1 database (required in V2) -----------------------------------------------------
 D1_NAME="cloudflare_stats_db"
@@ -105,12 +91,6 @@ crons = ["30 15 * * *"]
 name = "RATE_LIMITER"
 namespace_id = "1001"
 simple = { limit = $RATE_LIMIT, period = 60 }
-
-# Legacy binding — no longer used at runtime; kept for compatibility.
-[[kv_namespaces]]
-binding = "PAGE_STATS"
-id = "$KV_ID"
-preview_id = "$KV_ID"
 
 [[d1_databases]]
 binding = "DB"

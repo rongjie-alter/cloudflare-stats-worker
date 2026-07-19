@@ -8,7 +8,6 @@ A single worker (`src/index.js`) handles the ingest + query API and serves the d
 
 **Storage:**
 - **D1 (`DB`, database `cloudflare_stats_db`)** — single source of truth. Raw one-row-per-pageview fact table `events_tab` (hot 6-month window) + dictionary `dim_*_tab` lookup tables + `site_daily_tab` rollup + `events_monthly_tab` archive.
-- **KV (`PAGE_STATS`)** — legacy binding, **no longer used at runtime** (kept bound for deploy-script compatibility). Per-IP rate limiting moved to the Workers Rate Limiting binding (`RATE_LIMITER`, atomic/edge-enforced).
 
 **Metrics:** PV = `COUNT(*)`, UV = `COUNT(DISTINCT visitor_id)` over `events_tab`. UV is not additive across dimensions, which is why raw `visitor_id` rows are kept (enables exact arbitrary-dimension UV).
 
