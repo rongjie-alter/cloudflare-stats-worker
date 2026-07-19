@@ -5,10 +5,11 @@ compatibility_flags = ["nodejs_compat"]
 
 # --- Per-deployment configuration (edit these to reuse for another site) ---
 [vars]
-WORKER_DOMAIN         = "stats.example.com"          # domain hosting this worker
 ALLOWED_ORIGIN        = "https://blog.example.com"   # the ONE website allowed to report (+ 127.0.0.1/localhost for dev)
 RATE_LIMIT_PER_MINUTE = "120"                          # documented per-IP ingest cap; the ENFORCED value is the [[ratelimits]] `limit` below — keep them in sync
 TIMEZONE              = "Asia/Tokyo"                   # day-boundary timezone (default: Japan)
+# CF_ACCESS_TEAM_NAME = "yourteam"                    # Zero Trust team name (yourteam.cloudflareaccess.com) — enables JWT verification
+# CF_ACCESS_AUD       = ""                            # Access Application Audience tag (from Zero Trust dashboard) — leave blank to skip aud check
 
 # Per-IP ingest rate limit — atomic, edge-enforced via the Workers Rate Limiting
 # binding (free plan; no storage cost). Replaces the old non-atomic KV bucket.

@@ -22,6 +22,50 @@ import {
 import { isBot, parseUserAgent, parseReferrer } from "./ua.js";
 
 const WORKER_VERSION = "2.0.0";
+
+// --- Cloudflare Access JWT verification ---
+// Opt-in: only active when CF_ACCESS_TEAM_NAME is set in [vars].
+// Protects all routes except /api/collect, /beacon.js, and /health.
+
+let _jwksCache = null;
+let _jwksCacheExpiry = 0;
+
+async function _fetchJwks(teamName) {
+  if (_jwksCache && Date.now() < _jwksCacheExpiry) return _jwksCache;
+  const resp = await fetch(`https://${teamName}.cloudflareaccess.com/cdn-cgi/access/certs`);
+  if (!resp.ok) throw new Error("Failed to fetch Access certs");
+  _jwksCache = await resp.json();
+  _jwksCacheExpiry = Date.now() + 10 * 60 * 1000; // cache for 10 minutes
+  return _jwksCache;
+}
+
+function _b64url(s) {
+  const p = s.replace(/-/g, "+").replace(/_/g, "/");
+  return atob(p.padEnd(p.length + (4 - (p.length % 4)) % 4, "="));
+}
+
+async function verifyAccessJWT(token, teamName, aud) {
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  const [h, p, s] = parts;
+  const header = JSON.parse(_b64url(h));
+  const jwks = await _fetchJwks(teamName);
+  const jwk = jwks.keys?.find((k) => k.kid === header.kid) ?? jwks.keys?.[0];
+  if (!jwk) return false;
+  const key = await crypto.subtle.importKey(
+    "jwk", jwk,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false, ["verify"]
+  );
+  const sig = Uint8Array.from(_b64url(s), (c) => c.charCodeAt(0));
+  const data = new TextEncoder().encode(`${h}.${p}`);
+  if (!await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, sig, data)) return false;
+  const payload = JSON.parse(_b64url(p));
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.exp < now) return false;
+  if (aud && !payload.aud?.includes(aud)) return false;
+  return true;
+}
 const CACHE_TTL_SECONDS = 30;
 const CACHEABLE_PATHS = new Set(["/api/query", "/api/timeseries", "/api/summary", "/api/config"]);
 const MAX_QUERY_DAYS = 366;
@@ -68,6 +112,18 @@ export default {
 
     if (method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeadersFor(request, config) });
+    }
+
+    // Cloudflare Access JWT verification (opt-in via CF_ACCESS_TEAM_NAME var).
+    // Public paths that bypass auth: beacon ingest, beacon script, health check.
+    if (env.CF_ACCESS_TEAM_NAME) {
+      const PUBLIC = new Set(["/api/collect", "/beacon.js", "/health"]);
+      if (!PUBLIC.has(pathname)) {
+        const token = request.headers.get("CF-Access-JWT-Assertion");
+        if (!token) return new Response("Unauthorized", { status: 401 });
+        const ok = await verifyAccessJWT(token, env.CF_ACCESS_TEAM_NAME, env.CF_ACCESS_AUD).catch(() => false);
+        if (!ok) return new Response("Unauthorized", { status: 401 });
+      }
     }
 
     // Static assets / SPA for everything that isn't an API route.
