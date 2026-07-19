@@ -1,93 +1,104 @@
-# cloudflare-stats-worker
+# cloudflare-stats-worker (V2)
 
-Self-hosted website analytics on Cloudflare Workers. Tracks page views (PV) and unique visitors (UV) with no npm dependencies and no external services.
+Self-hosted, cookieless website analytics on Cloudflare Workers. Records rich per-pageview dimensions (OS, browser, device, country, referrer) with bot exclusion, and serves a preact dashboard. Reusable per-website via config.
 
 ## Architecture
 
-Single worker file handles both the API and the dashboard. No build step — pure ES module deployed directly via `wrangler deploy`.
+A single worker (`src/index.js`) handles the ingest + query API and serves the dashboard SPA from **Workers Static Assets**. The dashboard is a separate Vite/preact app built into `dashboard-v2/dist`.
 
-**Storage split:**
-- **KV (`PAGE_STATS`)** — hot counter store, all live reads/writes on every page view
-- **D1 (`DB`, database `cloudflare-stats-top`)** — SQL layer for ranked (`ORDER BY pv`) and date-range queries only; optional, failures never break counting
+**Storage:**
+- **D1 (`DB`, database `cloudflare_stats_db`)** — single source of truth. Raw one-row-per-pageview fact table `events_tab` (hot 6-month window) + dictionary `dim_*_tab` lookup tables + `site_daily_tab` rollup + `events_monthly_tab` archive.
+- **KV (`PAGE_STATS`)** — used **only** for per-IP rate-limit buckets.
 
-## Key Files
+**Metrics:** PV = `COUNT(*)`, UV = `COUNT(DISTINCT visitor_id)` over `events_tab`. UV is not additive across dimensions, which is why raw `visitor_id` rows are kept (enables exact arbitrary-dimension UV).
+
+## Naming convention
+
+D1 database uses a `_db` suffix; every table uses a `_tab` suffix (`events_tab`, `dim_path_tab`, …).
+
+## Key files
 
 | File | Purpose |
 |---|---|
-| `src/index.js` | Worker entry point — all routing, API handlers, KV/D1 logic |
-| `src/dashboard.js` | Exports the full dashboard SPA as an HTML string served at `/` |
-| `schema.sql` | D1 DDL: `page_stats` and `site_daily_stats` |
-| `wrangler.toml` | Binds KV namespace and D1 database |
-| `scripts/install.sh` | Interactive installer — preferred deployment path |
-| `check.js` | Node.js quick-check against a live deployment (`node check.js`) |
+| `src/index.js` | Worker: router, ingest, query API, `scheduled` cron, static-asset serving, `normalizePath`, timezone day logic |
+| `src/ua.js` | ua-parser-js wrapper: OS/browser/device parse, bot/AI-crawler exclusion, referrer parse |
+| `src/config.js` | Reads `[vars]`, origin/CORS enforcement, `localDay`/`localDayOffset` (Intl, tz-aware) |
+| `schema.sql` | D1 DDL (`dim_*_tab`, `events_tab`, `site_daily_tab`, `events_monthly_tab`; V1 tables kept as legacy baseline) |
+| `beacon.js` | Client beacon (also shipped from `dashboard-v2/public/beacon.js` → `/beacon.js`) |
+| `dashboard-v2/` | Vite + preact + AG Grid + ECharts dashboard (English only) |
+| `wrangler.toml` | `[vars]`, `[assets]`, `[triggers]` cron, KV + D1 bindings |
+| `check.js` | Node quick-check against a deployment |
 
-## API Routes
-
-```
-GET  /              Dashboard SPA
-POST /api/count     Increment PV/UV; invalidates cached responses
-GET  /api/stats     Page or site totals from KV          (cached 30s)
-GET  /api/batch     Bulk-read up to 50 paths from KV     (cached 30s)
-GET  /api/top       Top pages from D1 ranked by PV       (cached 60s)
-GET  /api/daily     Daily PV/UV from D1 by date range    (cached 30s)
-GET  /health        {status, version, timestamp}
-```
-
-Cache invalidation runs in `ctx.waitUntil` after every `/api/count`.
-
-## KV Key Schema
+## API routes
 
 ```
-page:<path>:pv                      page view count (permanent)
-page:<path>:uv                      unique visitor count (permanent)
-site:total:pv                       site-wide PV total (permanent)
-site:total:uv                       site-wide UV total (permanent)
-visitor:page:<path>:<id>:<date>     daily dedup key, TTL 86400s
-visitor:site:<id>:<date>            daily dedup key, TTL 86400s
-ratelimit:<ip>:<60s-bucket>         rate limit counter (120 req/60s), TTL 60s
+POST /api/collect      Ingest one pageview (beacon). Origin-restricted; bots excluded. -> 204
+GET  /api/query        Grouped breakdown: metric, from/to, group_by, filter, exclude, limit
+GET  /api/timeseries   Daily trend: metric, from/to, filters
+GET  /api/summary      Headline cards (today / 7d / 30d / all-time)
+GET  /api/config       { timezone } for client date math
+GET  /health           { status, version, timestamp }
+*                      Static assets (dashboard SPA) with SPA fallback
 ```
 
-Visitor ID: first 16 hex chars of `SHA-256(ip + userAgent)` — cookieless.
+Read endpoints (`/api/query|timeseries|summary|config`) are cached 30s via the Cache API.
 
-## D1 Tables
+### Query dimensions (whitelist)
 
-```sql
-page_stats(path TEXT PK, pv INT, uv INT, updated_at DATETIME)
-site_daily_stats(date TEXT PK, pv INT, uv INT, updated_at DATETIME)
-```
+`path, referrer_domain, referrer_path, country, browser, browser_version, os, os_version, device_type, device_vendor, device_model`. Filters use `dimension:value` tokens in `filter=` (include) / `exclude=`.
 
-Both are upserted in a single `db.batch()` call on every `/api/count`. D1 writes are in `try/catch` — failure is silent and never breaks the KV path.
+## Configuration (`wrangler.toml [vars]`)
 
-Auto-sync: if `/api/top` is called and D1 has no rows, `syncKVToD1` scans KV (`kv.list({ prefix: "page:", limit: 1000 })`) and bulk-inserts into D1.
+- `WORKER_DOMAIN` — domain hosting the worker
+- `ALLOWED_ORIGIN` — the single website allowed to report (plus `127.0.0.1`/`localhost` dev exception)
+- `RATE_LIMIT_PER_MINUTE` — per-IP ingest cap
+- `TIMEZONE` — day-boundary timezone (default `Asia/Tokyo`)
 
-## Path Normalization
+## Ingestion & bot exclusion
 
-All paths are normalized before use as KV keys or D1 PKs (`normalizePath`, `src/index.js`):
-- Full URLs → pathname only
-- Query strings and hash fragments stripped
-- `/index.html`, `/index`, `/_index` suffixes removed
-- Language prefixes `/zh-cn/`, `/zh-tw/`, `/en/` stripped
-- Trailing slash always appended
+`/api/collect` reads UA (server-side), IP, and `request.cf.country`; referrer comes from the beacon payload (`document.referrer`). Bots/AI crawlers are always dropped (`src/ua.js`: regex + ua-parser-js Crawlers extension). Visitor id = first 13 hex of `SHA-256(ip|userAgent)` as a 52-bit int. The event write runs in `ctx.waitUntil`. Dimension ids are resolved via an isolate-global get-or-create cache.
 
-## Local Development
+## Retention & rollup (cron)
+
+`scheduled` (cron `30 15 * * *` = 00:30 Asia/Tokyo) refreshes `site_daily_tab` and archives raw events older than 6 whole months into `events_monthly_tab` (per-dimension PV/UV, exact per single value but not cross-filterable), then deletes the raw rows.
+
+## Path normalization
+
+`normalizePath` (`src/index.js`): full URLs → pathname; strip query/hash; remove `/index.html`, `/index`, `/_index`; strip `/zh-cn/`, `/zh-tw/`, `/en/` language prefixes; always append trailing slash.
+
+## Local development
 
 ```bash
-wrangler dev          # local dev server with miniflare
-node check.js             # quick-check a live deployment
-bash scripts/test.sh      # smoke test (needs jq, targets $STATS_HOST)
-bash scripts/verify.sh <url>   # step-by-step verification (needs jq)
+pnpm install                              # root deps (ua-parser-js, wrangler)
+pnpm --dir dashboard-v2 install
+pnpm --dir dashboard-v2 build             # produce dashboard-v2/dist (needed for [assets])
+wrangler d1 execute cloudflare_stats_db --local --file=schema.sql
+wrangler dev                              # http://127.0.0.1:8787
+node check.js                             # quick-check (STATS_HOST to target remote)
+bash scripts/verify.sh <url>             # step-by-step verification (needs jq)
 ```
+
+Dashboard-only dev with API proxy: `pnpm --dir dashboard-v2 dev` (proxies `/api` to `wrangler dev` on :8787).
 
 ## Deployment
 
 ```bash
-bash scripts/install.sh   # interactive: creates KV/D1, rewrites wrangler.toml, deploys
-wrangler deploy       # re-deploy after code changes
-wrangler d1 execute cloudflare-stats-top --remote --file=schema.sql  # apply schema
+bash scripts/install.sh                   # interactive: creates KV/D1, applies schema, builds, writes wrangler.toml, deploys
+# or manually:
+pnpm --dir dashboard-v2 build && wrangler deploy
+wrangler d1 execute cloudflare_stats_db --remote --file=schema.sql   # apply schema
 ```
 
-## Dashboard
+## Client integration
 
-Bilingual (Traditional Chinese / English), Chart.js loaded from jsDelivr CDN with SRI. Language and theme are persisted in `localStorage`. Shows: total PV/UV, today's stats, 7/14/30-day trend chart, page search, top 10 pages.
+```html
+<script defer src="https://stats.example.com/beacon.js"></script>
+```
 
-The older `dashboard/index.html` is superseded by `src/dashboard.js` but kept for reference.
+The beacon POSTs `{ path, referrer }` to `/api/collect` via `navigator.sendBeacon`.
+
+## Notes
+
+- The V1 KV-counter model, `/api/count|stats|batch|top|daily`, and `src/dashboard.js` were removed in V2. Old D1 tables `page_stats`/`site_daily_stats` remain in `schema.sql` as an optional read-only pre-V2 baseline.
+- The dashboard is **English only**.
+- Package manager is **pnpm**; the worker bundles `ua-parser-js` via Wrangler's esbuild (needs `compatibility_flags = ["nodejs_compat"]`).

@@ -1,16 +1,35 @@
 name = "cloudflare-stats-worker"
 main = "src/index.js"
 compatibility_date = "2025-10-07"
+compatibility_flags = ["nodejs_compat"]
 
-# KV namespace for page stats (created with: wrangler kv namespace create PAGE_STATS)
+# --- Per-deployment configuration (edit these to reuse for another site) ---
+[vars]
+WORKER_DOMAIN         = "stats.example.com"          # domain hosting this worker
+ALLOWED_ORIGIN        = "https://blog.example.com"   # the ONE website allowed to report (+ 127.0.0.1/localhost for dev)
+RATE_LIMIT_PER_MINUTE = "120"                          # per-IP ingest rate limit
+TIMEZONE              = "Asia/Tokyo"                   # day-boundary timezone (default: Japan)
+
+# Dashboard SPA (built by: pnpm --dir dashboard-v2 build)
+[assets]
+directory = "./dashboard-v2/dist"
+binding   = "ASSETS"
+
+# Nightly maintenance: refresh daily rollup, archive + prune data > 6 months.
+# 15:30 UTC = 00:30 Asia/Tokyo, after the local day has closed.
+[triggers]
+crons = ["30 15 * * *"]
+
+# KV namespace — used ONLY for per-IP rate-limit buckets in V2.
+# Create with: wrangler kv namespace create PAGE_STATS
 [[kv_namespaces]]
 binding = "PAGE_STATS"
 id = "89eadc7ef04244c3834c1b97f326b075"
 preview_id = "89eadc7ef04244c3834c1b97f326b075"
 
-# Optional: D1 database for /api/top endpoint
-# Create with: wrangler d1 create cloudflare-stats-top
+# D1 database — single source of truth for all analytics.
+# Create with: wrangler d1 create cloudflare_stats_db
 [[d1_databases]]
 binding = "DB"
-database_name = "cloudflare-stats-top"
+database_name = "cloudflare_stats_db"
 database_id = "61645b6f-91cd-4716-bbd0-8b15ca2efdec"

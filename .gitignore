@@ -1,2 +1,5 @@
 .wrangler
 node_modules/
+dashboard-v2/node_modules/
+dashboard-v2/dist/
+*.log

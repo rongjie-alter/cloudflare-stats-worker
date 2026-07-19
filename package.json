@@ -1,0 +1,27 @@
+{
+  "name": "cloudflare-stats-worker",
+  "version": "2.0.0",
+  "description": "Self-hosted website analytics on Cloudflare Workers (KV + D1), with dimensional event recording and a preact dashboard.",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.12.0",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "pnpm --dir dashboard-v2 build && wrangler deploy",
+    "build:dashboard": "pnpm --dir dashboard-v2 build",
+    "schema": "wrangler d1 execute cloudflare_stats_db --remote --file=schema.sql",
+    "schema:local": "wrangler d1 execute cloudflare_stats_db --local --file=schema.sql"
+  },
+  "dependencies": {
+    "ag-grid-community": "^36.0.1",
+    "echarts": "^6.1.0",
+    "preact": "^10.29.7",
+    "ua-parser-js": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "wrangler": "^3.90.0"
+  }
+}

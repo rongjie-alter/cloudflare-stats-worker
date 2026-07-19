@@ -1,67 +1,51 @@
 #!/usr/bin/env bash
+# Step-by-step V2 verification. Usage: ./scripts/verify.sh <base-worker-url>
+# Uses Origin: http://127.0.0.1 (the built-in dev exception) so it can record a
+# test event against any deployment without knowing the configured allowed origin.
 set -euo pipefail
 
 BASE_URL=${1:-}
 if [[ -z "$BASE_URL" ]]; then
-  echo "Usage: $0 <base-worker-url>" >&2
-  echo "Example: $0 https://stats.zakk.au" >&2
+  echo "Usage: $0 <base-worker-url>   e.g. $0 https://stats.example.com" >&2
   exit 1
 fi
+command -v jq >/dev/null 2>&1 || { echo "[FAIL] jq is required" >&2; exit 1; }
 
 fail() { echo "[FAIL] $*" >&2; exit 1; }
+ok()   { echo "[ OK ] $*"; }
 info() { echo "[INFO] $*"; }
-ok() { echo "[ OK ] $*"; }
 
-TMP_PATH="/verify-test-$$/"
-COUNT_URL="$BASE_URL/api/count?url=$TMP_PATH"
-STATS_URL="$BASE_URL/api/stats?url=$TMP_PATH"
-SITE_URL="$BASE_URL/api/stats"
-TOP_URL="$BASE_URL/api/top?limit=3"
-HEALTH_URL="$BASE_URL/health"
+UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
-jq_check() {
-  if ! command -v jq >/dev/null 2>&1; then
-    fail "jq is required (brew install jq)"
-  fi
-}
+info "1. Health"
+curl -sS --max-time 10 "$BASE_URL/health" | jq -e '.status=="ok"' >/dev/null || fail "health not ok"
+ok "health"
 
-http_get() {
-  local url=$1
-  curl -sS --max-time 10 "$url" || return 1
-}
+info "2. Config"
+TZ=$(curl -sS "$BASE_URL/api/config" | jq -r '.timezone')
+[[ -n "$TZ" && "$TZ" != "null" ]] || fail "config missing timezone"
+ok "timezone=$TZ"
 
-jq_check
+info "3. Ingest a test pageview (Origin: dev exception)"
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/collect" \
+  -H "Origin: http://127.0.0.1" -H "User-Agent: $UA" -H "Content-Type: application/json" \
+  -d '{"path":"/_verify/","referrer":"https://www.google.com/"}')
+[[ "$CODE" == "204" ]] || fail "collect returned $CODE (expected 204)"
+ok "collect accepted"
 
-info "1. Health check"
-HEALTH_JSON=$(http_get "$HEALTH_URL") || fail "health endpoint unreachable"
-echo "$HEALTH_JSON" | jq -e '.status=="ok"' >/dev/null || fail "health status not ok"
-ok "health passed"
+info "4. Disallowed origin is rejected"
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/collect" \
+  -H "Origin: https://evil.example" -H "User-Agent: $UA" -H "Content-Type: application/json" \
+  -d '{"path":"/","referrer":""}')
+[[ "$CODE" == "403" ]] || fail "disallowed origin returned $CODE (expected 403)"
+ok "origin enforcement"
 
-info "2. Increment test path via /api/count"
-COUNT_JSON=$(http_get "$COUNT_URL") || fail "count request failed"
-PAGE_PV=$(echo "$COUNT_JSON" | jq -r '.page.pv')
-PAGE_UV=$(echo "$COUNT_JSON" | jq -r '.page.uv')
-[[ "$PAGE_PV" =~ ^[0-9]+$ ]] || fail "invalid pv"
-[[ "$PAGE_UV" =~ ^[0-9]+$ ]] || fail "invalid uv"
-ok "count increment returned pv=$PAGE_PV uv=$PAGE_UV"
+info "5. Summary"
+curl -sS "$BASE_URL/api/summary" | jq -e '(.today.pv|type)=="number"' >/dev/null || fail "summary invalid"
+ok "summary"
 
-info "3. Read back single page stats (no increment)"
-STATS_JSON=$(http_get "$STATS_URL") || fail "stats request failed"
-PV2=$(echo "$STATS_JSON" | jq -r '.page.pv')
-[[ "$PV2" =~ ^[0-9]+$ ]] || fail "invalid pv from stats"
-ok "stats read pv=$PV2"
+info "6. Query by country"
+curl -sS "$BASE_URL/api/query?metric=pageviews&group_by=country" | jq -e '(.results|type)=="array"' >/dev/null || fail "query invalid"
+ok "query"
 
-info "4. Site totals"
-SITE_JSON=$(http_get "$SITE_URL") || fail "site stats failed"
-echo "$SITE_JSON" | jq -e '.site.pv >= 0 and .site.uv >= 0' >/dev/null || fail "invalid site totals"
-ok "site totals ok"
-
-info "5. Top endpoint (may return error if D1 not bound)"
-TOP_JSON=$(http_get "$TOP_URL" || true)
-if echo "$TOP_JSON" | jq -e '.success == true' >/dev/null 2>&1; then
-  ok "top endpoint success"
-else
-  echo "$TOP_JSON" | jq '.' >/dev/null 2>&1 && echo "[WARN] top endpoint not ready or empty" || echo "[WARN] top endpoint non-JSON response"
-fi
-
-info "All checks completed."
+echo "All checks passed."

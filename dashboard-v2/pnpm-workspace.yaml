@@ -1,0 +1,21 @@
+minimumReleaseAgeExclude:
+  - '@oxc-project/types@0.139.0'
+  - '@preact/preset-vite@2.10.6'
+  - '@rolldown/binding-android-arm64@1.1.5'
+  - '@rolldown/binding-darwin-arm64@1.1.5'
+  - '@rolldown/binding-darwin-x64@1.1.5'
+  - '@rolldown/binding-freebsd-x64@1.1.5'
+  - '@rolldown/binding-linux-arm-gnueabihf@1.1.5'
+  - '@rolldown/binding-linux-arm64-gnu@1.1.5'
+  - '@rolldown/binding-linux-arm64-musl@1.1.5'
+  - '@rolldown/binding-linux-ppc64-gnu@1.1.5'
+  - '@rolldown/binding-linux-s390x-gnu@1.1.5'
+  - '@rolldown/binding-linux-x64-gnu@1.1.5'
+  - '@rolldown/binding-linux-x64-musl@1.1.5'
+  - '@rolldown/binding-openharmony-arm64@1.1.5'
+  - '@rolldown/binding-wasm32-wasi@1.1.5'
+  - '@rolldown/binding-win32-arm64-msvc@1.1.5'
+  - '@rolldown/binding-win32-x64-msvc@1.1.5'
+  - postcss@8.5.17
+  - rolldown@1.1.5
+  - vite@8.1.5
