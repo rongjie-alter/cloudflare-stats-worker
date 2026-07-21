@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { echarts, ensureWorldMap } from "../charts/echarts";
 import { palette } from "../charts/theme";
 import { addFilter, theme } from "../state/store";
+import { countryName } from "../utils/countryName";
 import type { AggregateRow } from "../api/types";
 
 export function CountryMap({ rows, metricLabel }: { rows: AggregateRow[]; metricLabel: string }) {
@@ -39,7 +40,7 @@ export function CountryMap({ rows, metricLabel }: { rows: AggregateRow[]; metric
     const max = rows.reduce((m, r) => Math.max(m, r.value), 0) || 1;
     chart.current.setOption(
       {
-        tooltip: { trigger: "item", formatter: (o: any) => `${o.name}: ${o.value || 0}` },
+        tooltip: { trigger: "item", formatter: (o: any) => `${countryName(o.name)}: ${o.value || 0}` },
         visualMap: {
           min: 0,
           max,

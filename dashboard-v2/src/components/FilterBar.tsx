@@ -1,4 +1,5 @@
 import { filters, removeFilter, clearFilters, DIMENSION_LABELS } from "../state/store";
+import { countryName } from "../utils/countryName";
 
 export function FilterBar() {
   const active = filters.value;
@@ -8,7 +9,7 @@ export function FilterBar() {
       {active.map((f) => (
         <span class={`chip ${f.op}`} title={`${f.op} ${f.dimension} = ${f.value}`}>
           {f.op === "exclude" ? "≠ " : ""}
-          {DIMENSION_LABELS[f.dimension]}: {f.value}
+          {DIMENSION_LABELS[f.dimension]}: {f.dimension === "country" ? countryName(f.value) : f.value}
           <button aria-label="Remove filter" onClick={() => removeFilter(f)}>
             ×
           </button>

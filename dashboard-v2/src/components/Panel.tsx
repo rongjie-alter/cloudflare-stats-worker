@@ -1,14 +1,16 @@
 import { useAggregate } from "../hooks";
 import { addFilter, openDrawer, DIMENSION_LABELS } from "../state/store";
+import { countryName } from "../utils/countryName";
 import type { AggregateRow, Dimension } from "../api/types";
 
 function PanelRow({ dimension, row, max }: { dimension: Dimension; row: AggregateRow; max: number }) {
   const pct = max > 0 ? (row.value / max) * 100 : 0;
+  const label = dimension === "country" ? countryName(row.key) : row.key;
   return (
     <div class="row">
       <div class="bar" style={`width:${pct}%`} />
-      <span class="key" title={row.key}>
-        {row.key}
+      <span class="key" title={label}>
+        {label}
       </span>
       <span class="val">{row.value.toLocaleString()}</span>
       <span class="actions">

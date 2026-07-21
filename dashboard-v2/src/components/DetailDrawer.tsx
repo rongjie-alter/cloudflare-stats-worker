@@ -16,6 +16,7 @@ import {
   DIMENSION_LABELS,
   DRAWER_DIMENSIONS,
 } from "../state/store";
+import { countryName } from "../utils/countryName";
 import type { AggregateRow, Dimension } from "../api/types";
 
 function DetailChart({ rows }: { rows: AggregateRow[] }) {
@@ -83,7 +84,14 @@ function DetailGrid({ dimension, rows }: { dimension: Dimension; rows: Aggregate
       ...(parentDim
         ? [{ headerName: DIMENSION_LABELS[parentDim], field: "parent" as const, flex: 1, filter: true, sortable: true }]
         : []),
-      { headerName: DIMENSION_LABELS[dimension], field: "key" as const, flex: 2, filter: true, sortable: true },
+      {
+        headerName: DIMENSION_LABELS[dimension],
+        field: "key" as const,
+        flex: 2,
+        filter: true,
+        sortable: true,
+        ...(dimension === "country" && { valueFormatter: (p) => countryName(p.value) }),
+      },
       {
         headerName: metricLabel,
         field: "value" as const,
