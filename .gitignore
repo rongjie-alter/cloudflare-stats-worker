@@ -5,3 +5,4 @@ dashboard-v2/dist/
 *.log
 *.pyc
 deployments/
+prod_backup.sql
