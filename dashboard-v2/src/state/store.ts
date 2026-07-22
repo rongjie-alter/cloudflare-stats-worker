@@ -107,16 +107,23 @@ export const PANEL_DIMENSIONS: Dimension[] = [
   "device_type",
 ];
 
-// Dimensions selectable inside the detail drawer (includes low-priority ones).
+// Dimensions selectable inside the detail drawer. Child dims of a hierarchy
+// (browser_version, os_version, device_vendor, device_model) are intentionally
+// excluded — they are reached by expanding levels inside a hierarchy root.
 export const DRAWER_DIMENSIONS: Dimension[] = [
   "path",
   "referrer_domain",
   "country",
   "browser",
-  "browser_version",
   "os",
-  "os_version",
   "device_type",
-  "device_vendor",
-  "device_model",
 ];
+
+// Hierarchical dimensions rendered as a sunburst in the drawer. Each entry maps
+// a root dimension to its ordered levels (root first). Levels are fetched via
+// client-side fan-out over /api/query, so counts stay exact at every ring.
+export const HIERARCHY: Partial<Record<Dimension, Dimension[]>> = {
+  device_type: ["device_type", "device_vendor", "device_model"],
+  browser: ["browser", "browser_version"],
+  os: ["os", "os_version"],
+};

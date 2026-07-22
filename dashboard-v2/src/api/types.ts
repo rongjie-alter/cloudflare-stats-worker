@@ -36,6 +36,15 @@ export interface AggregateRow {
   value: number;
 }
 
+// A node in a client-assembled dimension hierarchy (sunburst). Each node comes
+// from its own grouped /api/query, so `value` is exact at every level.
+export interface HierarchyNode {
+  key: string;
+  value: number;
+  dim: Dimension;
+  children?: HierarchyNode[];
+}
+
 export interface QueryResponse {
   metric: Metric;
   range: { from: string; to: string; timezone: string };

@@ -1,6 +1,6 @@
 // Tree-shaken ECharts registry — only the pieces the dashboard uses.
 import * as echarts from "echarts/core";
-import { BarChart, LineChart, PieChart, MapChart } from "echarts/charts";
+import { BarChart, LineChart, PieChart, MapChart, SunburstChart } from "echarts/charts";
 import {
   GridComponent,
   TooltipComponent,
@@ -15,6 +15,7 @@ echarts.use([
   LineChart,
   PieChart,
   MapChart,
+  SunburstChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
