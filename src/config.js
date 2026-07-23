@@ -5,6 +5,7 @@ const DEFAULTS = {
   ALLOWED_ORIGIN: "",
   RATE_LIMIT_PER_MINUTE: 120,
   TIMEZONE: "Asia/Tokyo",
+  RECORD_LOCALHOST: false,
 };
 
 /**
@@ -17,6 +18,7 @@ export function getConfig(env) {
     allowedOrigin: (env.ALLOWED_ORIGIN || DEFAULTS.ALLOWED_ORIGIN).trim().replace(/\/+$/, ""),
     rateLimitPerMinute: Number.isFinite(rateLimit) && rateLimit > 0 ? rateLimit : DEFAULTS.RATE_LIMIT_PER_MINUTE,
     timezone: (env.TIMEZONE || DEFAULTS.TIMEZONE).trim(),
+    recordLocalhost: (env.RECORD_LOCALHOST ?? String(DEFAULTS.RECORD_LOCALHOST)).trim().toLowerCase() === "true",
   };
 }
 
@@ -40,7 +42,7 @@ export function resolveRequestOrigin(request) {
   return null;
 }
 
-function isDevOrigin(origin) {
+export function isDevOrigin(origin) {
   try {
     const host = new URL(origin).hostname;
     return host === "127.0.0.1" || host === "localhost";

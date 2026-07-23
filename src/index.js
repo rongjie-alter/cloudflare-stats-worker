@@ -16,6 +16,7 @@ import {
   corsHeadersFor,
   resolveRequestOrigin,
   isAllowedOrigin,
+  isDevOrigin,
   localDay,
   localDayOffset,
 } from "./config.js";
@@ -140,6 +141,10 @@ async function handleCollect(request, env, ctx, config) {
   const origin = resolveRequestOrigin(request);
   if (!isAllowedOrigin(origin, config)) {
     return jsonResponse({ error: "Origin not allowed" }, 403, corsHeaders);
+  }
+
+  if (!config.recordLocalhost && isDevOrigin(origin)) {
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   // Trust only CF-Connecting-IP: it is set by Cloudflare and cannot be spoofed.

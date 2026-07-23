@@ -5,8 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 
 # --- Per-deployment configuration (edit these to reuse for another site) ---
 [vars]
-WORKER_DOMAIN         = "stats.example.com"          # domain hosting this worker
 ALLOWED_ORIGIN        = "https://blog.example.com"   # the ONE website allowed to report (+ 127.0.0.1/localhost for dev)
+RECORD_LOCALHOST      = "true"                        # set to "true" to record events from localhost/127.0.0.1 origins
 RATE_LIMIT_PER_MINUTE = "120"                          # documented per-IP ingest cap; the ENFORCED value is the [[ratelimits]] `limit` below — keep them in sync
 TIMEZONE              = "Asia/Tokyo"                   # day-boundary timezone (default: Japan)
 
