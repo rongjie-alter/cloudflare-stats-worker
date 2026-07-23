@@ -37,18 +37,21 @@ export function CountryMap({ rows, metricLabel }: { rows: AggregateRow[]; metric
   useEffect(() => {
     if (!ready || !chart.current) return;
     const p = palette();
-    const max = rows.reduce((m, r) => Math.max(m, r.value), 0) || 1;
+    const activeRows = rows.filter((r) => r.value >= 1);
+    const max = activeRows.reduce((m, r) => Math.max(m, r.value), 0) || 1;
+    const noDataColor = p.dark ? "#d1d5db" : "#f1f3f4";
     chart.current.setOption(
       {
         tooltip: { trigger: "item", formatter: (o: any) => `${countryName(o.name)}: ${o.value || 0}` },
         visualMap: {
-          min: 0,
+          min: 1,
           max,
           left: 12,
           bottom: 12,
           text: ["High", "Low"],
           calculable: true,
-          inRange: { color: p.dark ? ["#1b2836", "#4f8cff"] : ["#e6efff", "#2563eb"] },
+          inRange: { color: ["#9bbcf3", "#1a73e8", "#3f6bb1"] },
+          outOfRange: { color: [noDataColor] },
           textStyle: { color: p.muted },
         },
         series: [
@@ -58,7 +61,7 @@ export function CountryMap({ rows, metricLabel }: { rows: AggregateRow[]; metric
             map: "world",
             nameProperty: "ISO_A2_EH",
             roam: true,
-            itemStyle: { borderColor: p.grid, areaColor: p.bg },
+            itemStyle: { borderColor: p.grid, areaColor: noDataColor },
             emphasis: { label: { show: false }, itemStyle: { areaColor: p.accent } },
             data: rows.map((r) => ({ name: r.key, value: r.value })),
           },
