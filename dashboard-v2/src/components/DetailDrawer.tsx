@@ -185,11 +185,12 @@ function HierarchySunburst({ tree, metricLabel }: { tree: HierarchyNode[]; metri
         tooltip: {
           trigger: "item",
           formatter: (params: any) => {
-            const path = (params.treePathInfo || [])
-              .slice(1)
-              .map((t: any) => t.name)
-              .join(" › ");
-            return `${path}<br/><b>${(params.value ?? 0).toLocaleString()}</b> ${metricLabel}`;
+            const info = params.treePathInfo || [];
+            const path = info.slice(1).map((t: any) => t.name).join(" › ");
+            const total = info[0]?.value ?? 0;
+            const value = params.value ?? 0;
+            const pct = total > 0 ? ` (${((value / total) * 100).toFixed(1)}%)` : "";
+            return `${path}<br/><b>${value.toLocaleString()}</b> ${metricLabel}${pct}`;
           },
         },
         series: [
