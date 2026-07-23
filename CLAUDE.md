@@ -25,7 +25,7 @@ D1 database uses a `_db` suffix; every table uses a `_tab` suffix (`events_tab`,
 | `schema.sql` | D1 DDL (`dim_*_tab`, `events_tab`, `site_daily_tab`, `events_monthly_tab`; V1 tables kept as legacy baseline) |
 | `report.js` | Client beacon (also shipped from `dashboard-v2/public/report.js` → `/report.js`) |
 | `dashboard-v2/` | Vite + preact + AG Grid + ECharts dashboard (English only) |
-| `wrangler.toml` | `[vars]`, `[assets]`, `[triggers]` cron, KV + D1 bindings |
+| `wrangler.toml` | `[vars]`, `[assets]`, `[triggers]` cron, D1 bindings |
 | `check.js` | Node quick-check against a deployment |
 
 ## API routes
@@ -83,10 +83,7 @@ Dashboard-only dev with API proxy: `pnpm --dir dashboard-v2 dev` (proxies `/api`
 ## Deployment
 
 ```bash
-bash scripts/install.sh                   # interactive: creates KV/D1, applies schema, builds, writes wrangler.toml, deploys
-# or manually:
-pnpm --dir dashboard-v2 build && wrangler deploy
-wrangler d1 execute cloudflare_stats_db --remote --file=schema.sql   # apply schema
+python scripts/manage.py init
 ```
 
 ## Client integration
