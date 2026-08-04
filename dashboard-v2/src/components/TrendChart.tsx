@@ -45,7 +45,6 @@ export function TrendChart() {
           {
             name: metricVal === "visitors" ? "Visitors" : "Page Views",
             type: "line",
-            smooth: true,
             symbol: "circle",
             areaStyle: { opacity: 0.12 },
             lineStyle: { color: p.accent, width: 2 },
