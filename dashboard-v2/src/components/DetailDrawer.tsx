@@ -67,11 +67,11 @@ function DetailChart({ rows }: { rows: AggregateRow[] }) {
   return <div ref={el} style="width:100%;height:360px;" />;
 }
 
-const PARENT_DIM: Partial<Record<Dimension, Dimension>> = {
-  browser_version: "browser",
-  os_version: "os",
-};
-
+// Flat grid. Only ever rendered for dimensions with no parent (path,
+// referrer_domain, country) -- the parented ones (browser_version, os_version,
+// device_*) are reachable only through HierarchyView, which shows the whole
+// tuple. The old "parent" column here was unreachable, and the API no longer
+// returns that field.
 function DetailGrid({ dimension, rows }: { dimension: Dimension; rows: AggregateRow[] }) {
   const el = useRef<HTMLDivElement>(null);
   const api = useRef<GridApi | null>(null);
@@ -80,11 +80,7 @@ function DetailGrid({ dimension, rows }: { dimension: Dimension; rows: Aggregate
 
   useEffect(() => {
     if (!el.current) return;
-    const parentDim = PARENT_DIM[dimension] as Dimension | undefined;
     const columnDefs: ColDef<AggregateRow>[] = [
-      ...(parentDim
-        ? [{ headerName: DIMENSION_LABELS[parentDim], field: "parent" as const, flex: 1, filter: true, sortable: true }]
-        : []),
       {
         headerName: DIMENSION_LABELS[dimension],
         field: "key" as const,
@@ -345,7 +341,9 @@ function HierarchyView({ dimension }: { dimension: Dimension }) {
 // --- Flat (bar / map) view ----------------------------------------------------
 
 function FlatBody({ dimension }: { dimension: Dimension }) {
-  const { data, loading } = useAggregate(dimension, 500);
+  // 200 is the worker's clamp for a single-dimension breakdown; asking for more
+  // just produced a distinct cache key for an identical result.
+  const { data, loading } = useAggregate(dimension, 200);
   const rows = data?.results ?? [];
   const metricLabel = metric.value === "visitors" ? "Visitors" : "Page Views";
 

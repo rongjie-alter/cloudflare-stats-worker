@@ -9,10 +9,15 @@ const paths = [
   "/api/config",
   "/api/summary",
   "/api/timeseries?metric=pageviews",
-  "/api/query?metric=pageviews&group_by=country",
-  "/api/query?metric=visitors&group_by=browser",
+  "/api/query?metric=pageviews&group_by=country", // rollup path
+  "/api/query?metric=visitors&group_by=browser", // raw path (exact UV)
   "/api/query?metric=pageviews&group_by=referrer_domain",
+  "/api/query?metric=pageviews&group_by=path&filter=country:US", // raw path (filtered)
+  "/api/query?metric=pageviews&group_by=device_type,device_vendor,device_model", // tuple path
 ];
+
+// For a correctness check -- rollup vs raw vs ground truth, per dimension --
+// use scripts/verify-rollup.mjs. This file only proves the endpoints answer.
 
 async function fetchJson(path) {
   const url = new URL(path, HOST);

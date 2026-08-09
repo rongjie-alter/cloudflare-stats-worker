@@ -3,6 +3,15 @@ main = "src/index.js"
 compatibility_date = "2025-10-07"
 compatibility_flags = ["nodejs_compat"]
 
+# Workers Cache — caches responses in front of the Worker, keyed on the full URL.
+# This is what makes the Cache-Control headers in src/index.js actually do
+# something: the older `caches.default` API is a silent no-op on *.workers.dev,
+# so until now nothing was ever cached. Read endpoints send a 24h max-age for
+# date ranges that have already closed and 5m for anything touching today.
+# `cross_version_cache` is deliberately left off so a deploy invalidates.
+[cache]
+enabled = true
+
 # --- Per-deployment configuration (edit these to reuse for another site) ---
 [vars]
 ALLOWED_ORIGIN        = "https://blog.example.com"   # the ONE website allowed to report (+ 127.0.0.1/localhost for dev)

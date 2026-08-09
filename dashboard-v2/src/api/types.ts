@@ -32,12 +32,17 @@ export interface TimeRange {
 
 export interface AggregateRow {
   key: string;
-  parent?: string;
   value: number;
 }
 
-// A node in a client-assembled dimension hierarchy (sunburst). Each node comes
-// from its own grouped /api/query, so `value` is exact at every level.
+// One row of a multi-dimension breakdown: the whole tuple, outermost first.
+export interface TupleRow {
+  keys: string[];
+  value: number;
+}
+
+// A node in a dimension hierarchy (sunburst), assembled client-side from the
+// tuples returned by a single multi-dimension query.
 export interface HierarchyNode {
   key: string;
   value: number;
@@ -54,25 +59,39 @@ export interface QueryResponse {
   note?: string;
 }
 
+// Response shape when group_by names more than one dimension.
+export interface TupleQueryResponse {
+  metric: Metric;
+  range: { from: string; to: string; timezone: string };
+  group_by: Dimension[];
+  results: TupleRow[];
+  total: number;
+  note?: string;
+}
+
 export interface TimeseriesResponse {
   metric: Metric;
   interval: "day";
   results: { date: string; value: number }[];
 }
 
+// Pageview figures are live and exact. Unique-visitor figures are live only for
+// `today`; the rest come from a snapshot the worker's nightly cron writes, dated
+// by `uv_as_of` (null until that cron has run at least once).
 export interface SummaryResponse {
   timezone: string;
   today: { pv: number; uv: number };
-  last7d: { pv: number; uv: number };
-  last30d: { pv: number; uv: number };
-  allTime: { pv: number; uv: number; uv_note?: string };
+  last7d: { pv: number; uv: number | null };
+  last30d: { pv: number; uv: number | null };
+  allTime: { pv: number; uv: number | null; uv_note?: string };
+  uv_as_of: string | null;
 }
 
 export interface QueryParams {
   metric: Metric;
   from: string;
   to: string;
-  groupBy: Dimension;
+  groupBy: Dimension | Dimension[];
   filters: Filter[];
   limit?: number;
 }

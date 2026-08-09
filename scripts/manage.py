@@ -190,6 +190,13 @@ main = "../src/index.js"
 compatibility_date = "{compat_date}"
 compatibility_flags = ["nodejs_compat"]
 
+# Caches responses in front of the Worker. Required for the Cache-Control
+# headers the read endpoints emit to have any effect: the `caches.default` API
+# is a no-op on *.workers.dev. See wrangler.toml for the full note.
+[cache]
+enabled = true
+cross_version_cache = false
+
 [vars]
 ALLOWED_ORIGIN        = "{allowed_origin}"
 RATE_LIMIT_PER_MINUTE = "{rate_limit}"

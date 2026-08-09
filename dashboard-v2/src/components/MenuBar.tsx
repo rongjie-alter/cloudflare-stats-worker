@@ -11,6 +11,9 @@ function fmtDate(d: string) {
 
 const isValidDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
+// How long to wait after the last keystroke before applying a custom range.
+const RANGE_COMMIT_DELAY_MS = 400;
+
 function MetricSwitcher() {
   const m = metric.value;
   const opt = (id: Metric, label: string) => (
@@ -31,6 +34,11 @@ function TimeRangePicker() {
   const ref = useRef<HTMLDivElement>(null);
   const fromVal = useSignal(timeRange.value.from);
   const toVal = useSignal(timeRange.value.to);
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (commitTimer.current !== null) clearTimeout(commitTimer.current);
+  }, []);
 
   useEffect(() => {
     if (!open.value) return;
@@ -62,20 +70,28 @@ function TimeRangePicker() {
     toVal.value = timeRange.value.to;
   };
 
+  // Typing a year into <input type="date"> emits a valid-looking value on every
+  // keystroke -- "0002-…", "0020-…", "0202-…", "2026-…" -- and each one used to
+  // fire a full dashboard refresh immediately. Debouncing collapses that to one.
+  const commit = (from: string, to: string) => {
+    if (!isValidDate(from) || !isValidDate(to)) return;
+    if (commitTimer.current !== null) clearTimeout(commitTimer.current);
+    commitTimer.current = setTimeout(() => {
+      commitTimer.current = null;
+      setCustomRange(from, to);
+    }, RANGE_COMMIT_DELAY_MS);
+  };
+
   const handleFromInput = (e: Event) => {
     const val = (e.target as HTMLInputElement).value;
     fromVal.value = val;
-    if (isValidDate(val) && isValidDate(toVal.value)) {
-      setCustomRange(val, toVal.value);
-    }
+    commit(val, toVal.value);
   };
 
   const handleToInput = (e: Event) => {
     const val = (e.target as HTMLInputElement).value;
     toVal.value = val;
-    if (isValidDate(fromVal.value) && isValidDate(val)) {
-      setCustomRange(fromVal.value, val);
-    }
+    commit(fromVal.value, val);
   };
 
   return (

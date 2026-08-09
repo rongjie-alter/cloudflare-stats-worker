@@ -16,7 +16,10 @@ export function App() {
     document.documentElement.dataset.theme = theme.value;
     fetchConfig()
       .then((c) => {
-        if (c?.timezone) timezone.value = c.timezone;
+        // Guarded because `timezone` feeds timeRange -> queryKey: assigning a
+        // different value here re-fires every panel and the trend chart with new
+        // dates, doubling a cold page load's queries. Same value = no-op.
+        if (c?.timezone && c.timezone !== timezone.peek()) timezone.value = c.timezone;
       })
       .catch(() => {
         /* keep default tz */
