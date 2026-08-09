@@ -33,12 +33,13 @@ CREATE TABLE IF NOT EXISTS meta_tab (
   value TEXT NOT NULL
 ) WITHOUT ROWID;
 
--- Referrer is the dimension people actually filter on, and it was the only
--- panel dimension with no composite index. Deliberately the ONLY index added:
--- D1 bills a written row per index covering an inserted column, so each one
--- costs ~7.5K writes/day against a 100K/day free budget.
-CREATE INDEX IF NOT EXISTS idx_events_day_ref ON events_tab(day, ref_domain_id);
-
 -- The all-time card sums WHERE dimension = 'total'; idx_events_monthly_dim
--- cannot serve that because its leading column is `month`.
+-- cannot serve that because its leading column is `month`. Cheap: this table is
+-- empty until the first month ages out at 6 months.
 CREATE INDEX IF NOT EXISTS idx_events_monthly_total ON events_monthly_tab(dimension, month);
+
+-- NOTE: the referrer index is deliberately NOT here -- see
+-- migrations/add-referrer-index.sql. Building an index writes one row per
+-- existing table row, so on a large events_tab it can consume most of a day's
+-- 100K free write budget in one statement, and blocked writes mean DROPPED
+-- PAGEVIEWS. It is an opt-in, sized per database.
