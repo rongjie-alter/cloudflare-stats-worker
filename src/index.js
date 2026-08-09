@@ -292,10 +292,29 @@ async function getDimId(db, table, value) {
   const cached = dimCache.get(key);
   if (cached !== undefined) return cached;
 
-  const row = await db
-    .prepare(`INSERT INTO ${table}(value) VALUES(?) ON CONFLICT(value) DO UPDATE SET value=excluded.value RETURNING id`)
-    .bind(v)
-    .first();
+  // Read before write. The previous form was a single
+  //   INSERT ... ON CONFLICT(value) DO UPDATE SET value=excluded.value RETURNING id
+  // which is elegant but expensive in the wrong currency: on conflict it
+  // REWRITES the row (and its unique index entry) to the value it already had,
+  // so every isolate-cache miss cost ~2 rows written x 10 dimensions. Dimension
+  // values are tiny, stable sets that almost always already exist, so that was
+  // pure waste -- and it dominated the ingest write cost.
+  //
+  // D1's free tier gives 5M rows READ but only 100K rows WRITTEN per day,
+  // account-wide, and exhausted writes mean dropped pageviews. Trading a write
+  // for a read is therefore strongly favourable: the hit path below is now
+  // read-only, and only a genuinely new value writes anything.
+  let row = await db.prepare(`SELECT id FROM ${table} WHERE value = ?`).bind(v).first();
+  if (!row) {
+    // DO NOTHING (not DO UPDATE) so a concurrent insert of the same value does
+    // not rewrite the row. It also returns no row when it loses that race,
+    // which the re-read below resolves.
+    row = await db
+      .prepare(`INSERT INTO ${table}(value) VALUES(?) ON CONFLICT(value) DO NOTHING RETURNING id`)
+      .bind(v)
+      .first();
+    if (!row) row = await db.prepare(`SELECT id FROM ${table} WHERE value = ?`).bind(v).first();
+  }
   const id = row ? row.id : null;
   if (id !== null) {
     // FIFO cap: bound the isolate-global cache so unbounded distinct values

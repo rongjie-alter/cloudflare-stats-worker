@@ -100,9 +100,16 @@ Per-IP ingest rate limiting is enforced by the Workers **Rate Limiting binding**
 
 The archive probe is `SELECT MIN(day) FROM events_tab WHERE day < ?`. It used to be `SELECT DISTINCT (day / 100) ... WHERE (day / 100) < ?`, which wrapped the indexed column in an expression so `idx_events_day` could not be used: a **~1.35M-row full scan every single night**, even when there was nothing to archive. Verified with `EXPLAIN QUERY PLAN` — `SCAN ... USE TEMP B-TREE FOR DISTINCT` became `SEARCH events_tab USING COVERING INDEX idx_events_day (day<?)`.
 
-### Indexes are limited by writes, not storage
+## The write budget is the tighter constraint
 
-D1 bills a **written row per index covering an inserted column**, so each index on `events_tab` adds ~7.5K writes/day against a 100K/day free budget. That is why there are only four, and why `visitor_id` is in none of them. Do not add more without checking the write budget first.
+D1's free tier gives **5M rows read/day but only 100K rows written/day, account-wide across every database**. Reads were the presenting problem; writes are the one that silently bites, because **exhausted writes mean ingest drops real pageviews**.
+
+Two rules follow:
+
+- **Indexes are limited by writes, not storage.** D1 bills a written row per index covering an inserted column, so each index on `events_tab` costs one extra write per pageview forever — and *creating* one writes a row per existing row. That is why `idx_events_day_ref` lives in its own opt-in migration (`migrations/add-referrer-index.sql`) rather than the main one: on a 90K-row table it is a 90K-write statement, most of a day's budget in one go. Check `rows_written_24h` for **every** database with `wrangler d1 info` before adding one.
+- **Never spend a write where a read will do.** `getDimId` (`src/index.js`) reads before writing. It used to be a single `INSERT ... ON CONFLICT DO UPDATE SET value=excluded.value RETURNING id`, which on conflict rewrote the row and its unique index entry to the value they already held — ~2 wasted writes × 10 dimensions on every isolate-cache miss. Dimension values are tiny, stable sets that nearly always already exist, so this dominated ingest cost. The `SELECT` → `INSERT ... DO NOTHING RETURNING id` → `SELECT` sequence is race-safe (verified with concurrent inserts of the same new value producing exactly one row) and turns the common path read-only.
+
+Before any change that touches ingest, estimate writes per pageview. The floor is 4 (one `events_tab` row + its three indexes).
 
 ## Path normalization
 
