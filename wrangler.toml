@@ -43,3 +43,16 @@ crons = ["30 15 * * *"]
 binding = "DB"
 database_name = "cloudflare_stats_db"
 database_id = "61645b6f-91cd-4716-bbd0-8b15ca2efdec"
+
+# Live dashboard relay — single in-memory Durable Object instance that gates a
+# lone WebSocket viewer and fans out raw pageview events to it. No persistence
+# (no ctx.storage), so it needs no D1-style backup/migration story. SQLite
+# storage backend keeps it on the Workers Free plan (the legacy KV-backed
+# class would require Workers Paid).
+[[durable_objects.bindings]]
+name = "REALTIME"
+class_name = "RealtimeHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RealtimeHub"]

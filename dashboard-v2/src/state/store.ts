@@ -17,6 +17,14 @@ export const theme = signal<"light" | "dark">(
 // Detail drawer: which dimension is expanded (null = closed).
 export const drawerDimension = signal<Dimension | null>(null);
 
+// Which top-level view is showing: the historical D1-backed dashboard, or the
+// in-memory live view (see components/live/LiveView.tsx).
+export const view = signal<"history" | "live">("history");
+
+export function setView(v: "history" | "live") {
+  view.value = v;
+}
+
 // Derived time range from the active preset + timezone, or a custom range.
 export const timeRange = computed(() =>
   customRange.value

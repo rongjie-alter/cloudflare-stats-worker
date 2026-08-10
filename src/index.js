@@ -8,6 +8,7 @@
 //   GET  /api/timeseries  daily trend
 //   GET  /api/summary     headline cards (today / 7d / 30d / all-time)
 //   GET  /api/config      { timezone } for client-side date math
+//   GET  /api/realtime    WebSocket upgrade for the live (in-memory) dashboard
 //   GET  /health          { status, version, timestamp }
 //   *                     static assets (SPA)
 
@@ -21,6 +22,9 @@ import {
   localDayOffset,
 } from "./config.js";
 import { isBot, parseUserAgent, parseReferrer } from "./ua.js";
+import { RealtimeHub } from "./realtime.js";
+
+export { RealtimeHub };
 
 const WORKER_VERSION = "2.1.0";
 
@@ -144,6 +148,9 @@ export default {
             "Cache-Control": `public, max-age=${CACHE_TTL_CONFIG}, stale-while-revalidate=${CACHE_SWR}`,
           });
           break;
+        case "/api/realtime":
+          response = await handleRealtime(request, env, config);
+          break;
         case "/health":
           // Never cache: this is a liveness/version probe, and Workers Cache
           // applies heuristic freshness to any response that does not say
@@ -228,7 +235,56 @@ async function handleCollect(request, env, ctx, config) {
     );
   }
 
+  // Best-effort forward to the live-dashboard relay. Fully isolated from the
+  // D1 write above: a missing binding, a cold/erroring Durable Object, or a
+  // disconnected viewer must never affect ingest or D1 recording.
+  const realtime = getRealtimeHub(env);
+  if (realtime) {
+    ctx.waitUntil(
+      realtime
+        .ingest({
+          path,
+          country,
+          browser: ua.browser.name,
+          browserVersion: ua.browser.version,
+          os: ua.os.name,
+          osVersion: ua.os.version,
+          deviceType: ua.device.type,
+          deviceVendor: ua.device.vendor,
+          deviceModel: ua.device.model,
+          referrerDomain: ref.domain,
+          visitorId,
+        })
+        .catch((err) => console.error("[worker] realtime ingest error", err))
+    );
+  }
+
   return new Response(null, { status: 204, headers: corsHeaders });
+}
+
+// The live dashboard allows exactly one viewer, so every request routes to a
+// single fixed Durable Object instance rather than one keyed per session.
+function getRealtimeHub(env) {
+  if (!env.REALTIME) return null;
+  return env.REALTIME.get(env.REALTIME.idFromName("global"));
+}
+
+// WebSocket upgrade for the live dashboard. Unlike /api/send (which is called
+// FROM the tracked website, so it's restricted to config.allowedOrigin), this
+// is called from the dashboard SPA itself -- served by this same worker at
+// its OWN domain, which is a different origin from the tracked website. The
+// correct check is same-origin, not config.allowedOrigin.
+async function handleRealtime(request, env, config) {
+  const origin = resolveRequestOrigin(request);
+  const selfOrigin = new URL(request.url).origin;
+  if (origin !== selfOrigin && !isDevOrigin(origin)) {
+    return jsonResponse({ error: "Origin not allowed" }, 403, NO_STORE);
+  }
+  const realtime = getRealtimeHub(env);
+  if (!realtime) {
+    return jsonResponse({ error: "Realtime is not configured" }, 503, NO_STORE);
+  }
+  return realtime.fetch(request);
 }
 
 async function recordEvent(db, e) {

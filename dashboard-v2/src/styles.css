@@ -165,3 +165,20 @@ html[data-theme="dark"] .date-picker-inputs input[type="date"] { color-scheme: d
   .cards { grid-template-columns: repeat(2, 1fr); }
   .panel-grid { grid-template-columns: 1fr; }
 }
+
+/* Live view */
+.live-cards { grid-template-columns: repeat(2, 1fr); }
+.live-status {
+  display: flex; align-items: center; gap: 8px; color: var(--muted);
+  font-size: 12px; margin-bottom: 10px;
+}
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.live-dot.open { background: #22c55e; }
+.live-dot.connecting { background: #f5a524; }
+.live-dot.closed { background: var(--danger); }
+.live-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }
+.live-message { color: var(--muted); font-size: 14px; padding: 40px 0; text-align: center; }
+
+@media (max-width: 900px) {
+  .live-grid { grid-template-columns: 1fr; }
+}

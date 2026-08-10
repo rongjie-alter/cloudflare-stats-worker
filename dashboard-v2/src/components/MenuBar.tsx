@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { customRange, metric, preset, setCustomRange, setMetric, setPreset, theme, timeRange, toggleTheme } from "../state/store";
+import { customRange, metric, preset, setCustomRange, setMetric, setPreset, setView, theme, timeRange, toggleTheme, view } from "../state/store";
 import { PRESETS } from "../state/dates";
 import type { Metric, Preset } from "../api/types";
 
@@ -129,12 +129,28 @@ function TimeRangePicker() {
   );
 }
 
+function ViewSwitcher() {
+  const v = view.value;
+  return (
+    <div class="segmented" role="group" aria-label="View">
+      <button class={v === "history" ? "active" : ""} onClick={() => setView("history")}>
+        History
+      </button>
+      <button class={v === "live" ? "active" : ""} onClick={() => setView("live")}>
+        Live
+      </button>
+    </div>
+  );
+}
+
 export function MenuBar() {
+  const isLive = view.value === "live";
   return (
     <div class="menubar">
       <h1>Analytics</h1>
-      <MetricSwitcher />
-      <TimeRangePicker />
+      <ViewSwitcher />
+      {!isLive && <MetricSwitcher />}
+      {!isLive && <TimeRangePicker />}
       <button class="btn" onClick={toggleTheme} title="Toggle theme">
         {theme.value === "dark" ? "☀ Light" : "☾ Dark"}
       </button>

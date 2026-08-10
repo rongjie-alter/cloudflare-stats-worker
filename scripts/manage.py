@@ -218,6 +218,16 @@ crons = ["30 15 * * *"]
 binding = "DB"
 database_name = "{db_name}"
 database_id = "{d1_id}"
+
+# Live dashboard relay (see wrangler.toml at repo root for the full note).
+# SQLite storage backend keeps it on the Workers Free plan.
+[[durable_objects.bindings]]
+name = "REALTIME"
+class_name = "RealtimeHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RealtimeHub"]
 """
 
 

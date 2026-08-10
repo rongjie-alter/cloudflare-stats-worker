@@ -5,11 +5,13 @@ import { FilterBar } from "./components/FilterBar";
 import { SummaryCards } from "./components/SummaryCards";
 import { TrendChart } from "./components/TrendChart";
 import { PanelGrid } from "./components/PanelGrid";
-import { drawerDimension, theme, timezone } from "./state/store";
+import { drawerDimension, theme, timezone, view } from "./state/store";
 import { fetchConfig } from "./api/client";
 
 // AG Grid + the drawer's heavy code load only when a panel is expanded.
 const DetailDrawer = lazy(() => import("./components/DetailDrawer"));
+// WebSocket + live charts only load once the "Live" tab is opened.
+const LiveView = lazy(() => import("./components/live/LiveView"));
 
 export function App() {
   useEffect(() => {
@@ -29,14 +31,22 @@ export function App() {
   return (
     <div class="app">
       <MenuBar />
-      <FilterBar />
-      <SummaryCards />
-      <TrendChart />
-      <PanelGrid />
-      {drawerDimension.value && (
+      {view.value === "live" ? (
         <Suspense fallback={null}>
-          <DetailDrawer />
+          <LiveView />
         </Suspense>
+      ) : (
+        <>
+          <FilterBar />
+          <SummaryCards />
+          <TrendChart />
+          <PanelGrid />
+          {drawerDimension.value && (
+            <Suspense fallback={null}>
+              <DetailDrawer />
+            </Suspense>
+          )}
+        </>
       )}
     </div>
   );
