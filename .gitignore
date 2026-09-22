@@ -6,3 +6,5 @@ dashboard-v2/dist/
 *.pyc
 deployments/
 prod_backup.sql
+.agents/skills/
+.claude/skills/
