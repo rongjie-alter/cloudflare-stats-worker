@@ -55,6 +55,12 @@ D1 database uses a `_db` suffix; every table uses a `_tab` suffix (`events_tab`,
 | `report.js` | Client beacon (also shipped from `dashboard-v2/public/report.js` → `/report.js`) |
 | `dashboard-v2/` | Vite + preact + AG Grid + ECharts dashboard (English only) |
 | `wrangler.toml` | `[vars]`, `[assets]`, `[triggers]` cron, D1 bindings |
+| `src/archive.js` | Parquet archive: schema v1, R2 key layout, hand-rolled dictionary encoder (shared with the Node scripts) |
+| `src/archive-do.js` | `ArchiveWriter` Durable Object — runs the encode, D1 in / R2 out |
+| `src/dimensions.js` | `DIMENSIONS` whitelist (name -> FK column, dim table), shared by the query API and the archive |
+| `scripts/verify-archive.mjs` | Recounts archived Parquet days and diffs PV + UV per dimension against the raw D1 path |
+| `scripts/bench-archive.mjs` | Encoder CPU benchmark (synthetic 7.5K/15K-row days) |
+| `dashboard-v2/src/duck/` | DuckDB-Wasm engine, archive loading/import/export, MoM queries and filter compiler |
 | `check.js` | Node quick-check against a deployment |
 
 ## API routes
@@ -65,6 +71,9 @@ GET  /api/query        Grouped breakdown: metric, from/to, group_by, filter, exc
 GET  /api/timeseries   Daily trend: metric, from/to, filters
 GET  /api/summary      Headline cards (today / 7d / 30d / all-time)
 GET  /api/config       { timezone } for client date math
+GET  /api/archive/manifest  archived Parquet days in R2 + the live tail range
+GET  /api/archive/file      ?day=YYYY-MM-DD — one archived day (Parquet)
+GET  /api/archive/live      days after archive_max_day (normally today), encoded on the fly
 GET  /health           { status, version, timestamp }
 *                      Static assets (dashboard SPA) with SPA fallback
 ```
@@ -96,9 +105,29 @@ Per-IP ingest rate limiting is enforced by the Workers **Rate Limiting binding**
 1. **Seals** every closed day not yet sealed, up to yesterday, into all three rollups. Always re-seals the last 2 days (ingest writes are fire-and-forget via `ctx.waitUntil`, so stragglers land late) and resumes from `rollup_max_day` so the sealed window stays contiguous — capped at `MAX_SEAL_DAYS_PER_RUN`.
 2. **Extends** coverage backwards a few days (`extendRollupHistory`).
 3. **Refreshes** the UV snapshot: 7d/30d nightly, all-time on Sundays.
-4. **Archives** raw events older than 6 whole months into `events_monthly_tab`, then deletes the raw rows *and* the rollup rows for those days — leaving them would make the all-time PV card count the month twice.
+4. **Archives** raw events older than 6 whole months into `events_monthly_tab`, then deletes the raw rows *and* the rollup rows for those days — leaving them would make the all-time PV card count the month twice. **Skipped** for any month the Parquet archive does not cover yet (when an R2 bucket is bound), so raw rows are never destroyed before they reach R2.
+5. **Exports** closed days to the Parquet archive — see below.
 
 The archive probe is `SELECT MIN(day) FROM events_tab WHERE day < ?`. It used to be `SELECT DISTINCT (day / 100) ... WHERE (day / 100) < ?`, which wrapped the indexed column in an expression so `idx_events_day` could not be used: a **~1.35M-row full scan every single night**, even when there was nothing to archive. Verified with `EXPLAIN QUERY PLAN` — `SCAN ... USE TEMP B-TREE FOR DISTINCT` became `SEARCH events_tab USING COVERING INDEX idx_events_day (day<?)`.
+
+## Parquet archive & Month-over-Month view
+
+Cross-filtered questions ("top paths in July from JP, excluding google.com") cannot come from the 1-D rollups, and answering them from `events_tab` would eat the read budget. So every closed day is written once to **R2** as an immutable Parquet file, `events/v1/YYYY/MM/YYYYMMDD.parquet`, and the dashboard's **Month vs Month** tab downloads whole days and queries them in **DuckDB-Wasm**. Arbitrary filters, excludes, regexes, raw SQL and exact `COUNT(DISTINCT visitor_id)` all cost **0 D1 rows**.
+
+- **Schema v1:** `day INT32` (yyyymmdd), `visitor_id INT64`, and one nullable STRING column per `DIMENSIONS` key, named exactly like the API dimensions. Files are self-contained and denormalized. A daily file, the live file, a month exported from the dashboard and a file imported back all share this schema.
+- **One file per day, not one per month.** R2 objects cannot be appended to. Rewriting a monthly file nightly would re-read up to 225K rows from D1 every night, and it could not be encoded in time.
+- **CPU is why `ArchiveWriter` exists.** Workers Free gives 10 ms CPU per invocation, cron included. The generic `hyparquet-writer` path measured 25–65 ms per 7.5K-row day. The hand-rolled encoder in `src/archive.js` measures 5–15 ms: it uses dim ids as the dictionary keys and UTF-8 encodes only distinct values. That is still too close to 10 ms, so the cron and `/api/archive/live` hand the work to a stateless Durable Object over RPC. A DO invocation gets 30 s of CPU on every plan.
+- **Coverage:**
+  - `meta_tab.archive_min_day` / `archive_max_day` bound a contiguous archived window.
+  - Each night the window extends forward to yesterday (≤ `MAX_ARCHIVE_DAYS_PER_RUN`) and walks back towards the oldest raw event (`ARCHIVE_BACKFILL_DAYS_PER_RUN`).
+  - A day with no events gets no file.
+  - Cost per archived day: ~1 row read per pageview plus the distinct dim values, 1 meta write per run, and 3 subrequests.
+- **Freshness:** the dashboard merges archived days with `/api/archive/live`, which is D1 → Parquet for the days after `archive_max_day`, so the current month is queryable before it closes. Day-file URLs carry the R2 etag (`&v=`), so they are cached for 24 h safely.
+- **Export / import:** the dashboard's ⬇ button writes one month to a single zstd Parquet file (DuckDB `COPY`). Import (button or drag-and-drop) loads such files back as their own source, so a month that has aged out of R2 or D1 can still be compared.
+- **DuckDB-Wasm loads from jsDelivr, pinned.** Its `.wasm` (~36 MB) is over the 25 MiB static-asset limit. The parquet extension comes from `extensions.duckdb.org`, and the CSP in `serveAsset` allows both.
+  - That CSP only reaches worker-served responses. Real asset hits (including `/`) bypass the worker because `run_worker_first` is unset, so in practice the dashboard HTML ships without a CSP. This predates the archive.
+
+Verify an archive against D1 with `node scripts/verify-archive.mjs [from] [to]` (`STATS_HOST` to target a deployment).
 
 ## The write budget is the tighter constraint
 
@@ -122,7 +151,8 @@ pnpm install                              # root deps (ua-parser-js, wrangler)
 pnpm --dir dashboard-v2 install
 pnpm --dir dashboard-v2 build             # produce dashboard-v2/dist (needed for [assets])
 wrangler d1 execute cloudflare_stats_db --local --file=schema.sql
-wrangler dev --test-scheduled             # http://127.0.0.1:8787
+wrangler dev --test-scheduled             # http://127.0.0.1:8787 (local R2 + DOs are simulated)
+curl "http://127.0.0.1:8787/cdn-cgi/handler/scheduled?cron=30+15+*+*+*"   # run the cron (repeat to backfill the archive)
 node check.js                             # quick-check (STATS_HOST to target remote)
 bash scripts/verify.sh <url>             # step-by-step verification (needs jq)
 ```

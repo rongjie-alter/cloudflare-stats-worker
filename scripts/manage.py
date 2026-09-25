@@ -228,6 +228,21 @@ class_name = "RealtimeHub"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RealtimeHub"]
+
+# Parquet archive: one file per closed day, read by the Month-over-Month view
+# (see wrangler.toml at repo root). ArchiveWriter is a Durable Object only for
+# its own 30s CPU allowance; the Worker itself gets 10ms on the Free plan.
+[[r2_buckets]]
+binding = "ARCHIVE"
+bucket_name = "{bucket_name}"
+
+[[durable_objects.bindings]]
+name = "ARCHIVER"
+class_name = "ArchiveWriter"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ArchiveWriter"]
 """
 
 
@@ -241,6 +256,7 @@ def render_deployment_toml(cfg):
         timezone=cfg["timezone"],
         db_name=cfg["db_name"],
         d1_id=cfg["d1_id"],
+        bucket_name=cfg["bucket_name"],
     )
 
 
@@ -256,6 +272,28 @@ def list_deployment_files():
     if not DEPLOYMENTS_DIR.exists():
         return []
     return sorted(DEPLOYMENTS_DIR.glob("*.toml"))
+
+
+# ---------------------------------------------------------------------------
+# R2 helpers
+# ---------------------------------------------------------------------------
+
+
+def r2_create_or_fetch(bucket_name):
+    """Create the R2 bucket for the Parquet archive. Reuses it if it already exists."""
+    info(f"Creating R2 bucket '{bucket_name}'...")
+    rc, output = run_capture(["wrangler", "r2", "bucket", "create", bucket_name])
+    if rc == 0:
+        ok(f"R2 bucket created: {bucket_name}")
+    elif "already exists" in output.lower() or "already own" in output.lower():
+        warn(f"Bucket '{bucket_name}' already exists — reusing it.")
+    else:
+        print(output)
+        raise ManageError(
+            f"wrangler r2 bucket create failed (exit {rc}). R2 must be enabled on the "
+            "account once (dashboard > R2) before buckets can be created."
+        )
+    return bucket_name
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +513,7 @@ def cmd_init(args):
 
     default_db = f"{worker_name}-db"
     db_name = _prompt("D1 database name", default_db)
+    bucket_name = _prompt("R2 bucket for the Parquet archive", f"{worker_name}-archive")
 
     # Validate all string values are TOML-safe
     for val, fname in [
@@ -482,6 +521,7 @@ def cmd_init(args):
         (allowed_origin, "Allowed origin"),
         (timezone, "Timezone"),
         (db_name, "D1 database name"),
+        (bucket_name, "R2 bucket name"),
     ]:
         _toml_str(val, fname)
 
@@ -500,6 +540,7 @@ def cmd_init(args):
     # D1 setup
     d1_id = d1_create_or_fetch(db_name)
     apply_schema(db_name)
+    r2_create_or_fetch(bucket_name)
 
     # Build dashboard
     build_dashboard()
@@ -513,6 +554,7 @@ def cmd_init(args):
         "timezone": timezone,
         "db_name": db_name,
         "d1_id": d1_id,
+        "bucket_name": bucket_name,
     }
     write_deployment_toml(worker_name, cfg)
 

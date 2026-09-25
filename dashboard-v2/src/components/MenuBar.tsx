@@ -139,18 +139,22 @@ function ViewSwitcher() {
       <button class={v === "live" ? "active" : ""} onClick={() => setView("live")}>
         Live
       </button>
+      <button class={v === "mom" ? "active" : ""} onClick={() => setView("mom")}>
+        Month vs Month
+      </button>
     </div>
   );
 }
 
 export function MenuBar() {
-  const isLive = view.value === "live";
+  // Live and Month-over-Month have their own time model and metric toggles.
+  const isHistory = view.value === "history";
   return (
     <div class="menubar">
       <h1>Analytics</h1>
       <ViewSwitcher />
-      {!isLive && <MetricSwitcher />}
-      {!isLive && <TimeRangePicker />}
+      {isHistory && <MetricSwitcher />}
+      {isHistory && <TimeRangePicker />}
       <button class="btn" onClick={toggleTheme} title="Toggle theme">
         {theme.value === "dark" ? "☀ Light" : "☾ Dark"}
       </button>

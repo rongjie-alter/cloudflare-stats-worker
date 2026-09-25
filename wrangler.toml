@@ -56,3 +56,24 @@ class_name = "RealtimeHub"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RealtimeHub"]
+
+# Parquet archive — one immutable file per closed day (events/v1/YYYY/MM/
+# YYYYMMDD.parquet), written by the nightly cron and read by the dashboard's
+# Month-over-Month view in DuckDB-Wasm. Create with:
+#   wrangler r2 bucket create cloudflare-stats-archive
+# Omit both blocks below to run without an archive (the cron then prunes
+# 6-month-old raw events without keeping them anywhere, as before).
+[[r2_buckets]]
+binding = "ARCHIVE"
+bucket_name = "cloudflare-stats-archive"
+
+# Encodes the Parquet files. A Durable Object only because it gets its own 30s
+# CPU allowance per invocation even on Workers Free, where the Worker itself
+# (cron included) gets 10ms — less than one day's encode. Stateless.
+[[durable_objects.bindings]]
+name = "ARCHIVER"
+class_name = "ArchiveWriter"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ArchiveWriter"]

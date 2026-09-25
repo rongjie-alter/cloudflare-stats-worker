@@ -12,6 +12,9 @@ import { fetchConfig } from "./api/client";
 const DetailDrawer = lazy(() => import("./components/DetailDrawer"));
 // WebSocket + live charts only load once the "Live" tab is opened.
 const LiveView = lazy(() => import("./components/live/LiveView"));
+// DuckDB-Wasm (and the ~36 MB engine it pulls from the CDN) only loads once
+// the Month-over-Month tab is opened.
+const MomView = lazy(() => import("./components/mom/MomView"));
 
 export function App() {
   useEffect(() => {
@@ -34,6 +37,10 @@ export function App() {
       {view.value === "live" ? (
         <Suspense fallback={null}>
           <LiveView />
+        </Suspense>
+      ) : view.value === "mom" ? (
+        <Suspense fallback={<div class="live-message">Loading…</div>}>
+          <MomView />
         </Suspense>
       ) : (
         <>

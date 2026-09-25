@@ -14,6 +14,9 @@ importers:
       echarts:
         specifier: ^6.1.0
         version: 6.1.0
+      hyparquet-writer:
+        specifier: ^0.16.10
+        version: 0.16.10
       preact:
         specifier: ^10.29.7
         version: 10.29.7
@@ -21,6 +24,9 @@ importers:
         specifier: ^2.0.0
         version: 2.0.10
     devDependencies:
+      hyparquet:
+        specifier: ^1.31.1
+        version: 1.31.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -682,6 +688,12 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  hyparquet-writer@0.16.10:
+    resolution: {integrity: sha512-53fpiA57kdJ2V7X97/VSAzHr8rb8Z2cr126T1pTL9TapZNOP/wNJqFh+jc7dRwwg9TpVMYeRNDMb+r5oiLqwjg==}
+
+  hyparquet@1.31.1:
+    resolution: {integrity: sha512-tF9580Xb+41+Eb+mH0av1k7m1PWl+PSKrX66Yd7UOZ760cwEXP9/enwHRMSCeVncaubRI8XPb3v580/ujYKK5w==}
 
   is-standalone-pwa@0.1.1:
     resolution: {integrity: sha512-9Cbovsa52vNQCjdXOzeQq5CnCbAcRk05aU62K20WO372NrTv0NxibLFCK6lQ4/iZEFdEA3p3t2VNOn8AJ53F5g==}
@@ -1358,6 +1370,12 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  hyparquet-writer@0.16.10:
+    dependencies:
+      hyparquet: 1.31.1
+
+  hyparquet@1.31.1: {}
 
   is-standalone-pwa@0.1.1: {}
 

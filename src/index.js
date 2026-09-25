@@ -9,6 +9,9 @@
 //   GET  /api/summary     headline cards (today / 7d / 30d / all-time)
 //   GET  /api/config      { timezone } for client-side date math
 //   GET  /api/realtime    WebSocket upgrade for the live (in-memory) dashboard
+//   GET  /api/archive/manifest  archived Parquet days (R2) + the live tail range
+//   GET  /api/archive/file      one archived day as Parquet
+//   GET  /api/archive/live      not-yet-archived days (normally today) as Parquet
 //   GET  /health          { status, version, timestamp }
 //   *                     static assets (SPA)
 
@@ -23,8 +26,11 @@ import {
 } from "./config.js";
 import { isBot, parseUserAgent, parseReferrer } from "./ua.js";
 import { RealtimeHub } from "./realtime.js";
+import { ArchiveWriter } from "./archive-do.js";
+import { DIMENSIONS } from "./dimensions.js";
+import { archiveKey, dayFromKey, ARCHIVE_PREFIX } from "./archive.js";
 
-export { RealtimeHub };
+export { RealtimeHub, ArchiveWriter };
 
 const WORKER_VERSION = "2.1.0";
 
@@ -73,28 +79,29 @@ const MAX_SEAL_DAYS_PER_RUN = 7;
 // already use one each).
 const UV_SNAPSHOT_WEEKDAY = 0;
 
+// --- Parquet archive (see src/archive.js) ------------------------------------
+// [archive_min_day, archive_max_day] is the contiguous window of days already
+// written to R2, one file per day. Like the rollups, it moves forwards nightly
+// and walks backwards over history a few days per run.
+const META_ARCHIVE_MIN_DAY = "archive_min_day";
+const META_ARCHIVE_MAX_DAY = "archive_max_day";
+// Each archived day costs ~1 D1 row read per pageview plus the distinct dim
+// values (~7.5K at current traffic), and 3 subrequests inside the
+// ArchiveWriter invocation (rows, dim values, R2 put). 3 forward + 10 backward
+// = 39 subrequests, under the Free plan's 50, and ~100K rows read (2% of the
+// daily budget) only while history is still being backfilled.
+const MAX_ARCHIVE_DAYS_PER_RUN = 3;
+const ARCHIVE_BACKFILL_DAYS_PER_RUN = 10;
+// /api/archive/live covers days after archive_max_day up to today -- normally
+// just today. Bounded so a stalled archive cannot turn it into a long scan.
+const MAX_LIVE_DAYS = 3;
+
 // Drill-down hierarchies, stored as whole tuples in hier_daily_tab. Keys must
 // match HIERARCHY in dashboard-v2/src/state/store.ts.
 const HIERARCHIES = {
   browser: ["browser", "browser_version"],
   os: ["os", "os_version"],
   device: ["device_type", "device_vendor", "device_model"],
-};
-
-// Whitelist: dimension name -> { fact-table FK column, lookup table }.
-// Both sides are trusted constants (never user input) so interpolating them
-// into SQL is safe; all *values* are always bound parameters.
-const DIMENSIONS = {
-  path: { col: "path_id", table: "dim_path_tab" },
-  referrer_domain: { col: "ref_domain_id", table: "dim_ref_domain_tab" },
-  country: { col: "country_id", table: "dim_country_tab" },
-  browser: { col: "browser_id", table: "dim_browser_tab" },
-  browser_version: { col: "browser_ver_id", table: "dim_browser_ver_tab" },
-  os: { col: "os_id", table: "dim_os_tab" },
-  os_version: { col: "os_ver_id", table: "dim_os_ver_tab" },
-  device_type: { col: "device_type_id", table: "dim_device_type_tab" },
-  device_vendor: { col: "device_vendor_id", table: "dim_device_vendor_tab" },
-  device_model: { col: "device_model_id", table: "dim_device_model_tab" },
 };
 
 // (PARENT_DIMS is gone: the `parent` column it produced existed so the client
@@ -150,6 +157,15 @@ export default {
           break;
         case "/api/realtime":
           response = await handleRealtime(request, env, config);
+          break;
+        case "/api/archive/manifest":
+          response = await handleArchiveManifest(env, config);
+          break;
+        case "/api/archive/file":
+          response = await handleArchiveFile(url, env);
+          break;
+        case "/api/archive/live":
+          response = await handleArchiveLive(env, config);
           break;
         case "/health":
           // Never cache: this is a liveness/version probe, and Workers Cache
@@ -798,6 +814,93 @@ function parseJson(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Parquet archive: read side (the dashboard's Month-over-Month view)
+// ---------------------------------------------------------------------------
+//
+// The dashboard downloads whole day files and queries them in DuckDB-Wasm, so
+// arbitrary cross-filters cost 0 D1 rows. Only the live tail -- days after
+// archive_max_day, normally just today -- is read from D1.
+
+function requireArchive(env) {
+  if (!env.ARCHIVE || !env.ARCHIVER) {
+    const error = new Error("Parquet archive is not configured (no R2 bucket bound)");
+    error.status = 503;
+    throw error;
+  }
+  return env.ARCHIVE;
+}
+
+// Days after the archived window, up to today, capped at MAX_LIVE_DAYS.
+function liveRange(meta, config) {
+  const today = localDay(config.timezone);
+  const maxDay = Number(meta[META_ARCHIVE_MAX_DAY] ?? 0);
+  const floor = offsetDayInt(today, -(MAX_LIVE_DAYS - 1));
+  const from = maxDay ? Math.max(offsetDayInt(maxDay, 1), floor) : today;
+  return { from: Math.min(from, today), to: today };
+}
+
+async function handleArchiveManifest(env, config) {
+  const bucket = requireArchive(env);
+  const db = requireD1(env);
+  const days = [];
+  let cursor;
+  do {
+    const page = await bucket.list({ prefix: ARCHIVE_PREFIX, cursor });
+    for (const obj of page.objects) {
+      const day = dayFromKey(obj.key);
+      if (day) days.push({ day: dayIntToISO(day), size: obj.size, etag: obj.etag });
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  days.sort((a, b) => (a.day < b.day ? -1 : 1));
+
+  const meta = await readMeta(db);
+  const live = liveRange(meta, config);
+  return jsonResponse(
+    {
+      timezone: config.timezone,
+      days,
+      live: { from: dayIntToISO(live.from), to: dayIntToISO(live.to) },
+    },
+    200,
+    { "Cache-Control": `public, max-age=${CACHE_TTL_LIVE}` }
+  );
+}
+
+// The dashboard appends the manifest's etag (`&v=`) so a re-exported day gets
+// a new URL, which is what makes the long cache lifetime safe.
+async function handleArchiveFile(url, env) {
+  const bucket = requireArchive(env);
+  const day = parseDayParam(url.searchParams.get("day"));
+  if (!day) return jsonResponse({ error: "day must be YYYY-MM-DD" }, 400, NO_STORE);
+  const obj = await bucket.get(archiveKey(day));
+  if (!obj) return jsonResponse({ error: "Not archived" }, 404, NO_STORE);
+  const headers = new Headers();
+  obj.writeHttpMetadata(headers);
+  headers.set("ETag", obj.httpEtag);
+  headers.set("Content-Length", String(obj.size));
+  headers.set("Content-Disposition", `attachment; filename="stats-${dayIntToISO(day)}.parquet"`);
+  headers.set("Cache-Control", `public, max-age=${CACHE_TTL_CLOSED}, immutable`);
+  return new Response(obj.body, { headers });
+}
+
+async function handleArchiveLive(env, config) {
+  requireArchive(env);
+  const db = requireD1(env);
+  const { from, to } = liveRange(await readMeta(db), config);
+  const bytes = await archiveWriter(env).encodeLive(from, to, archiveMeta(config));
+  const headers = {
+    "Cache-Control": `public, max-age=${CACHE_TTL_LIVE}`,
+    "X-Archive-From": dayIntToISO(from),
+    "X-Archive-To": dayIntToISO(to),
+  };
+  if (!bytes) return new Response(null, { status: 204, headers });
+  return new Response(bytes, {
+    headers: { ...headers, "Content-Type": "application/vnd.apache.parquet" },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Scheduled maintenance: refresh daily rollup, archive + prune > 6 months
 // ---------------------------------------------------------------------------
 
@@ -853,8 +956,99 @@ async function runMaintenance(env) {
   for (;;) {
     const row = await db.prepare("SELECT MIN(day) AS day FROM events_tab WHERE day < ?").bind(cutoffDay).first();
     if (!row || row.day === null) break;
-    await archiveMonth(db, Math.floor(Number(row.day) / 100));
+    const month = Math.floor(Number(row.day) / 100);
+    // Pruning destroys the raw rows, and the Parquet archive is the only thing
+    // that keeps them at event level. Never prune a month R2 does not hold yet;
+    // the backward walk in exportArchive gets there within a few nights.
+    if (!(await archiveCovers(env, db, Number(row.day), month * 100 + 31))) {
+      console.warn(`[worker] not pruning month ${month}: Parquet archive does not cover it yet`);
+      break;
+    }
+    await archiveMonth(db, month);
   }
+
+  // 5) Write closed days to the Parquet archive in R2. Last on purpose: it is
+  //    the only step that can fail for reasons outside D1 (R2, the Durable
+  //    Object), and nothing above depends on it -- except the prune guard,
+  //    which fails safe by keeping data.
+  await exportArchive(env, db, config, today);
+}
+
+function archiveMeta(config) {
+  return { timezone: config.timezone, site: config.allowedOrigin };
+}
+
+function archiveWriter(env) {
+  return env.ARCHIVER.get(env.ARCHIVER.idFromName("archive"));
+}
+
+// True when [from, to] lies inside the archived window. Deployments without an
+// R2 bucket keep the old behaviour (prune without archiving).
+async function archiveCovers(env, db, from, to) {
+  if (!env.ARCHIVE || !env.ARCHIVER) return true;
+  const meta = await readMeta(db);
+  const min = Number(meta[META_ARCHIVE_MIN_DAY] ?? 0);
+  const max = Number(meta[META_ARCHIVE_MAX_DAY] ?? 0);
+  return Boolean(min && max && min <= from && max >= to);
+}
+
+// Extend the archived window forwards to yesterday and backwards towards the
+// oldest raw event, bounded per run. Files are immutable once written; a day
+// is rewritten only if it is exported again (idempotent overwrite).
+async function exportArchive(env, db, config, today) {
+  if (!env.ARCHIVE || !env.ARCHIVER) return;
+  const yesterday = offsetDayInt(today, -1);
+  const meta = await readMeta(db);
+  const maxDay = Number(meta[META_ARCHIVE_MAX_DAY] ?? 0);
+  const minDay = Number(meta[META_ARCHIVE_MIN_DAY] ?? 0);
+
+  // Forward: resume after the last archived day, or start at yesterday.
+  const forward = [];
+  for (const day of eachDay(maxDay ? offsetDayInt(maxDay, 1) : yesterday, yesterday)) {
+    if (forward.length >= MAX_ARCHIVE_DAYS_PER_RUN) break;
+    forward.push(day);
+  }
+
+  // Backward: walk from the window's start towards the oldest retained event.
+  const backward = [];
+  const start = minDay || forward[0];
+  const oldest = await db.prepare("SELECT MIN(day) AS day FROM events_tab").first();
+  if (start && oldest && oldest.day !== null && Number(oldest.day) < start) {
+    const to = offsetDayInt(start, -1);
+    const from = Math.max(Number(oldest.day), offsetDayInt(to, -(ARCHIVE_BACKFILL_DAYS_PER_RUN - 1)));
+    backward.push(...eachDay(from, to));
+  }
+
+  const days = [...backward, ...forward];
+  if (days.length === 0) return;
+  const result = await archiveWriter(env).exportDays(days, archiveMeta(config));
+
+  const newMax = forward.length ? forward[forward.length - 1] : maxDay;
+  const newMin = backward.length ? backward[0] : start;
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO meta_tab (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = CASE
+           WHEN CAST(excluded.value AS INTEGER) > CAST(meta_tab.value AS INTEGER) THEN excluded.value
+           ELSE meta_tab.value END`
+      )
+      .bind(META_ARCHIVE_MAX_DAY, String(newMax)),
+    db
+      .prepare(
+        `INSERT INTO meta_tab (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = CASE
+           WHEN CAST(excluded.value AS INTEGER) < CAST(meta_tab.value AS INTEGER) THEN excluded.value
+           ELSE meta_tab.value END`
+      )
+      .bind(META_ARCHIVE_MIN_DAY, String(newMin)),
+  ]);
+  metaCache = { at: 0, value: null };
+  const written = result.filter((r) => r.bytes > 0);
+  console.log(
+    `[worker] archived ${written.length}/${days.length} days to R2 (${days[0]}..${days[days.length - 1]}), ` +
+      `window ${newMin}..${newMax}`
+  );
 }
 
 // Recompute the rollups for [from, to] from scratch. Idempotent: every write is
@@ -1066,8 +1260,15 @@ async function serveAsset(request, env, url) {
   const headers = new Headers(res.headers);
   headers.set(
     "Content-Security-Policy",
+    // The Month-over-Month view runs DuckDB-Wasm, loaded from jsDelivr (its
+    // 36 MB .wasm is over the 25 MiB static-asset limit). It needs to compile
+    // wasm ('wasm-unsafe-eval'), fetch the bundle and its parquet extension
+    // (connect-src), and start its worker from a blob: URL that
+    // importScripts() the CDN script.
     "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
-      "script-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'self'; frame-ancestors 'none'"
+      "script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; " +
+      "worker-src 'self' blob:; connect-src 'self' https://cdn.jsdelivr.net https://extensions.duckdb.org; " +
+      "font-src 'self'; base-uri 'self'; frame-ancestors 'none'"
   );
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
