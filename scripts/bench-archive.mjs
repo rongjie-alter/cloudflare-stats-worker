@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Rough CPU proxy for the nightly Parquet export (src/archive.js encodeEvents).
 //
-// Workers Free allows 10ms CPU per invocation, cron included, so the encoder
-// has to fit a full day well inside that. This builds synthetic days with
-// realistic cardinalities and times the encode. The *first* run matters most:
-// a cron invocation usually lands in a cold isolate, before the JIT warms up.
+// Encoding runs in the ArchiveWriter Durable Object, which gets 30s CPU per
+// invocation, so this is a sanity check rather than a hard budget the way it
+// was when encoding ran inline in the 10ms Worker fetch handler. This builds
+// synthetic days with realistic cardinalities and times the encode. The
+// *first* run matters most: a cron invocation usually lands in a cold
+// isolate, before the JIT warms up.
 //
 //   node scripts/bench-archive.mjs [rows...]      (default: 7500 15000)
 

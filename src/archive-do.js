@@ -1,11 +1,11 @@
 // Parquet encoding runs here, not in the Worker, purely for the CPU budget.
 //
-// Workers Free allows 10ms CPU per invocation -- cron included -- and encoding
-// one day of pageviews measures 5-15ms warm and 25ms+ in a cold isolate
-// (scripts/bench-archive.mjs). A Durable Object invocation gets its own CPU
-// allowance of 30s on every plan (SQLite-backed classes run on Free), so the
-// nightly cron and /api/archive/live hand the work to this singleton over RPC.
-// It keeps no state: no ctx.storage, no fields -- D1 in, R2 out.
+// Workers Free allows 10ms CPU per invocation -- cron included -- which the
+// Worker's own fetch handler could never spend on a day's worth of encoding.
+// A Durable Object invocation gets its own CPU allowance of 30s on every plan
+// (SQLite-backed classes run on Free), so the nightly cron and
+// /api/archive/live hand the work to this singleton over RPC. It keeps no
+// state: no ctx.storage, no fields -- D1 in, R2 out.
 import { DurableObject } from "cloudflare:workers";
 import { archiveKey, encodeEvents, fetchDayRows, fetchDimMaps, ARCHIVE_CONTENT_TYPE } from "./archive.js";
 

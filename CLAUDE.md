@@ -55,7 +55,7 @@ D1 database uses a `_db` suffix; every table uses a `_tab` suffix (`events_tab`,
 | `report.js` | Client beacon (also shipped from `dashboard-v2/public/report.js` → `/report.js`) |
 | `dashboard-v2/` | Vite + preact + AG Grid + ECharts dashboard (English only) |
 | `wrangler.toml` | `[vars]`, `[assets]`, `[triggers]` cron, D1 bindings |
-| `src/archive.js` | Parquet archive: schema v1, R2 key layout, hand-rolled dictionary encoder (shared with the Node scripts) |
+| `src/archive.js` | Parquet archive: schema v1, R2 key layout, encoder built on `hyparquet-writer` (shared with the Node scripts) |
 | `src/archive-do.js` | `ArchiveWriter` Durable Object — runs the encode, D1 in / R2 out |
 | `src/dimensions.js` | `DIMENSIONS` whitelist (name -> FK column, dim table), shared by the query API and the archive |
 | `scripts/verify-archive.mjs` | Recounts archived Parquet days and diffs PV + UV per dimension against the raw D1 path |
@@ -116,7 +116,7 @@ Cross-filtered questions ("top paths in July from JP, excluding google.com") can
 
 - **Schema v1:** `day INT32` (yyyymmdd), `visitor_id INT64`, and one nullable STRING column per `DIMENSIONS` key, named exactly like the API dimensions. Files are self-contained and denormalized. A daily file, the live file, a month exported from the dashboard and a file imported back all share this schema.
 - **One file per day, not one per month.** R2 objects cannot be appended to. Rewriting a monthly file nightly would re-read up to 225K rows from D1 every night, and it could not be encoded in time.
-- **CPU is why `ArchiveWriter` exists.** Workers Free gives 10 ms CPU per invocation, cron included. The generic `hyparquet-writer` path measured 25–65 ms per 7.5K-row day. The hand-rolled encoder in `src/archive.js` measures 5–15 ms: it uses dim ids as the dictionary keys and UTF-8 encodes only distinct values. That is still too close to 10 ms, so the cron and `/api/archive/live` hand the work to a stateless Durable Object over RPC. A DO invocation gets 30 s of CPU on every plan.
+- **CPU is why `ArchiveWriter` exists.** Workers Free gives 10 ms CPU per invocation, cron included — nowhere near enough for a day's encode, which is why the cron and `/api/archive/live` hand the work to a stateless Durable Object over RPC instead of doing it inline. A DO invocation gets 30 s of CPU on every plan, which is what actually fits the work: `src/archive.js`'s `encodeEvents` calls `hyparquet-writer`'s `parquetWriteBuffer` directly (measured 25–65 ms per 7.5K-row day locally, low double-digit ms in production per Durable Object `cpuTimeMs`) rather than maintaining a hand-rolled dictionary encoder to chase a 10 ms budget the Worker itself no longer has to meet.
 - **Coverage:**
   - `meta_tab.archive_min_day` / `archive_max_day` bound a contiguous archived window.
   - Each night the window extends forward to yesterday (≤ `MAX_ARCHIVE_DAYS_PER_RUN`) and walks back towards the oldest raw event (`ARCHIVE_BACKFILL_DAYS_PER_RUN`).
