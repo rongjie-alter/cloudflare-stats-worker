@@ -197,6 +197,21 @@ compatibility_flags = ["nodejs_compat"]
 enabled = true
 cross_version_cache = false
 
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 1
+persist = true
+
 [vars]
 ALLOWED_ORIGIN        = "{allowed_origin}"
 RATE_LIMIT_PER_MINUTE = "{rate_limit}"
