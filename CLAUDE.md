@@ -157,6 +157,14 @@ node check.js                             # quick-check (STATS_HOST to target re
 bash scripts/verify.sh <url>             # step-by-step verification (needs jq)
 ```
 
+### Testing an Access-protected deployment
+
+Live deployments sit behind Cloudflare Zero Trust Access — fine for real admins, but it blocks scripted checks since `check.js`/`verify.sh` can't complete an OAuth flow. User can put Cloudflare Access credentials in a repo-root `.env` (gitignored) as `CF_Access_Client_Id` / `CF_Access_Client_Secret`.
+
+`check.js` (via `node --env-file=.env check.js`) and `scripts/verify.sh` (which sources `.env` itself) both send `CF-Access-Client-Id`/`CF-Access-Client-Secret` automatically when those two vars are set, and are silent no-ops against anything not behind Access.
+
+This only unblocks header-based requests (curl/fetch) — it does not help a browser-driven visual check, since a normal page navigation can't attach custom headers.
+
 ### Proving the rollups changed no numbers
 
 `scripts/verify-rollup.mjs` computes ground truth straight from the raw events in a dump and diffs it against the API. Every dimension is checked twice — once as served (rollup path) and once with a no-op `exclude` token that forces the raw path — and both must equal ground truth.

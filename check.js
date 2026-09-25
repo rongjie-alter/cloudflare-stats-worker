@@ -1,9 +1,18 @@
 #!/usr/bin/env node
-// Quick read-only check against a live V2 deployment: node check.js
-// Override target with STATS_HOST=https://stats.example.com node check.js
+// Quick read-only check against a live V2 deployment: node --env-file=.env check.js
+// Override target with STATS_HOST=https://stats.example.com node --env-file=.env check.js
+//
+// If the target is behind Cloudflare Access, put a Service Token's credentials in
+// .env as CF_Access_Client_Id / CF_Access_Client_Secret (see AGENTS.md / CLAUDE.md
+// "Testing an Access-protected deployment") and they'll be sent automatically.
 import { setTimeout as delay } from "node:timers/promises";
 
 const HOST = process.env.STATS_HOST || "http://127.0.0.1:8787";
+const accessHeaders = {};
+if (process.env.CF_Access_Client_Id && process.env.CF_Access_Client_Secret) {
+  accessHeaders["CF-Access-Client-Id"] = process.env.CF_Access_Client_Id;
+  accessHeaders["CF-Access-Client-Secret"] = process.env.CF_Access_Client_Secret;
+}
 const paths = [
   "/health",
   "/api/config",
@@ -22,7 +31,9 @@ const paths = [
 async function fetchJson(path) {
   const url = new URL(path, HOST);
   url.searchParams.set("t", Date.now().toString());
-  const res = await fetch(url, { headers: { "User-Agent": "stats-check/2.0" } });
+  const res = await fetch(url, {
+    headers: { "User-Agent": "stats-check/2.0", ...accessHeaders },
+  });
   if (!res.ok) throw new Error(`${url.href} -> HTTP ${res.status}`);
   return res.json();
 }

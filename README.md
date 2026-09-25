@@ -130,6 +130,42 @@ bash scripts/verify.sh http://127.0.0.1:8787
 
 Raw events are kept day-level for ~6 months. A nightly cron (`30 15 * * *`, i.e. 00:30 Asia/Tokyo) refreshes the `site_daily_tab` rollup and archives older months into `events_monthly_tab` (per-dimension PV/UV — exact per single value, but not cross-filterable once the raw rows are pruned), then deletes the raw rows.
 
+## Cloudflare Zero Trust Access Authentication
+
+It is recommended to configure [Cloudflare Zero Trust](https://www.cloudflare.com/products/access/) to limit dashboard access to trusted admins only. Cloudflare Zero Trust has a free tier that allows 50 users for free (though a credit card is needed just to enable it).
+
+Only the dashboard SPA itself should require a login — `/api/send` (the ingest beacon) and `/report.js` (the client script) are called directly by anonymous visitor browsers on your site, so they must stay public or every pageview beacon fails. This means **one worker domain needs three separate Access applications**: one covering the whole domain (protected), and two narrower ones that override it for the two public paths.
+
+### Setup
+
+1. Open **Zero Trust dashboard → Access controls → Applications → Create new application → Self-hosted**.
+2. **Protect the dashboard** — create the first application:
+   - **Application domain**: your worker's domain, e.g. `stats.example.com` (no path — this covers everything).
+   - Add a policy restricting access to trusted admins, e.g. **Action: Allow**, **Include: GitHub → your org**, or **Include: Emails → your address(es)**.
+   - Save. At this point the *entire* domain, including `/api/send` and `/report.js`, requires login.
+3. **Open up `/api/send`** — create a second application on the same domain:
+   - **Application domain**: same domain, but with path `stats.example.com/api/send`.
+   - Policy: **Action: Bypass** (or **Allow** with **Include: Everyone**, labelled "Public" in the dashboard) — no login required.
+   - Save.
+4. **Open up `/report.js`** — create a third application the same way:
+   - **Application domain**: `stats.example.com/report.js`.
+   - Policy: same **Public**/**Bypass** policy as above.
+   - Save.
+
+Cloudflare Access matches the **most specific path** first, so the two public path-scoped applications take precedence over the domain-wide one and exempt just those two routes. Everything else — the dashboard HTML, `/api/query`, `/api/timeseries`, `/api/summary` — still requires the login from step 2. You should end up with three applications listed for the one worker (**Applications** list, one row each), with destinations `<domain>`, `<domain>/api/send`, and `<domain>/report.js`, where only the first has a real (non-Public) policy attached.
+
+Verify by opening the dashboard domain in a private/incognito window — it should prompt for login — then confirming `curl -I https://stats.example.com/report.js` and a beacon POST to `/api/send` both return successfully without any Access redirect.
+
+### Allow local testing to Access-protected deployments
+
+Some deployments sit behind Cloudflare Zero Trust Access — fine for real admins, but it blocks scripted checks since `check.js`/`verify.sh` can't complete an OAuth flow. The fix is a Cloudflare Access **Service Token**, which is a bypass credential scoped to one Access application, not an account-wide key:
+
+1. In the Zero Trust dashboard: **Access controls → Service credentials → Service Tokens → Create Service Token**. Copy the Client ID/Secret immediately — the secret is shown once.
+2. On the target Access application, add a second policy: **Action: Service Auth**, **Include: Service Token** → the token from step 1. Leave the existing policies in place; Service Auth policies are evaluated before Allow/Block, so this doesn't loosen human access.
+3. Put the credentials in a repo-root `.env` (gitignored) as `CF_Access_Client_Id` / `CF_Access_Client_Secret`.
+
+`check.js` (via `node --env-file=.env check.js`) and `scripts/verify.sh` (which sources `.env` itself) both send `CF-Access-Client-Id`/`CF-Access-Client-Secret` automatically when those two vars are set, and are silent no-ops against anything not behind Access.
+
 ---
 
 ## License
