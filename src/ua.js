@@ -66,7 +66,7 @@ export function parseUserAgent(userAgent) {
   const device = parser.getDevice();
 
   return {
-    os: { name: clean(os.name), version: clean(os.version) },
+    os: { name: clean(os.name), version: majorVersion(clean(os.version)) },
     browser: { name: clean(browser.name), version: majorVersion(clean(browser.version)) },
     device: {
       type: device.type ? clean(device.type) : "desktop",
