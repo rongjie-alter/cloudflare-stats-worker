@@ -89,6 +89,23 @@ async function createDb(): Promise<duckdb.AsyncDuckDB> {
   return db;
 }
 
+// Every table currently holding rows, used to build autocomplete suggestions
+// for the MoM filter builder across whatever has been loaded so far.
+const sources = new Set<string>(["server"]);
+
+export function knownSources(): string[] {
+  return [...sources];
+}
+
+// Distinct known values for a dimension, across every loaded source. Used
+// only for autocomplete suggestions -- 0 D1 rows, all local to DuckDB-Wasm.
+export async function dimensionValues(dim: Dimension): Promise<string[]> {
+  if (!DIMENSIONS.includes(dim)) throw new Error(`bad dimension ${dim}`);
+  const parts = [...sources].map((t) => `SELECT DISTINCT ${dim} AS v FROM ${t} WHERE ${dim} IS NOT NULL`);
+  const rows = await query<{ v: string }>(`${parts.join(" UNION ")} LIMIT 500`);
+  return rows.map((r) => r.v);
+}
+
 export function getDb(): Promise<duckdb.AsyncDuckDB> {
   if (!dbPromise) {
     dbPromise = createDb();
@@ -247,6 +264,7 @@ export async function importFiles(files: File[]): Promise<ImportedSource> {
   }
   const months = (await query<{ m: number }>(`SELECT DISTINCT day // 100 AS m FROM ${id} ORDER BY m`)).map((r) => r.m);
   const [{ n }] = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM ${id}`);
+  sources.add(id);
   return { id, name: files.map((f) => f.name).join(", "), months, rows: n };
 }
 

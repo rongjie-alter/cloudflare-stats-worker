@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "preact/hooks";
 import { createGrid } from "ag-grid-community";
 import type { ColDef, GridApi, GridOptions } from "ag-grid-community";
 import { gridTheme } from "../../grid/agGridSetup";
+import { MultiFilter } from "../../grid/MultiFilter";
 import type { Dimension } from "../../api/types";
 import type { BreakdownRow } from "../../duck/mom";
 import { toggleRowFilter } from "../../state/mom";
@@ -60,7 +61,7 @@ export function MomDeltaTable({
         field: "key",
         flex: 2,
         minWidth: 160,
-        filter: true,
+        filter: MultiFilter,
         pinned: "left",
         ...(dimension === "country" && { valueFormatter: (p) => countryName(p.value) }),
       },

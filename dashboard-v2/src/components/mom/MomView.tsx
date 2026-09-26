@@ -297,7 +297,7 @@ export default function MomView() {
       </div>
       {error && <div class="mom-error">{error}</div>}
 
-      <MomFilterBar />
+      <MomFilterBar dataVersion={dataVersion} />
 
       {!options.length && <div class="live-message">Nothing archived yet. The nightly cron writes one file per closed day.</div>}
 

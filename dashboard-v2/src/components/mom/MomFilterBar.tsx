@@ -1,6 +1,8 @@
 import { useSignal } from "@preact/signals";
+import { useEffect } from "preact/hooks";
 import type { Dimension } from "../../api/types";
-import { DIMENSIONS } from "../../duck/db";
+import { AutocompleteInput } from "../AutocompleteInput";
+import { DIMENSIONS, dimensionValues } from "../../duck/db";
 import { MATCH_LABELS, type MatchOp } from "../../duck/sql";
 import { addMomFilter, clearMomFilters, momAdvanced, momFilters, removeMomFilter } from "../../state/mom";
 import { DIMENSION_LABELS } from "../../state/store";
@@ -9,13 +11,27 @@ import { countryName } from "../../utils/countryName";
 // Filter chips plus a builder for the richer filters DuckDB can evaluate:
 // several values per filter (comma-separated, OR-ed), substring / prefix /
 // regex matching, and a raw SQL WHERE for anything else.
-export function MomFilterBar() {
+export function MomFilterBar({ dataVersion }: { dataVersion: number }) {
   const dim = useSignal<Dimension>("path");
   const op = useSignal<"include" | "exclude">("include");
   const match = useSignal<MatchOp>("equals");
   const text = useSignal("");
   const showAdvanced = useSignal(momAdvanced.value !== "");
   const advancedDraft = useSignal(momAdvanced.value);
+  const valuePool = useSignal<string[]>([]);
+
+  // Refetch whenever the chosen dimension changes, and whenever MomView loads
+  // another month into DuckDB (the value pool is empty until then).
+  useEffect(() => {
+    if (!dataVersion) return;
+    let cancelled = false;
+    dimensionValues(dim.value)
+      .then((v) => !cancelled && (valuePool.value = v))
+      .catch(() => !cancelled && (valuePool.value = []));
+    return () => {
+      cancelled = true;
+    };
+  }, [dim.value, dataVersion]);
 
   const add = (e: Event) => {
     e.preventDefault();
@@ -45,11 +61,12 @@ export function MomFilterBar() {
             <option value={m}>{MATCH_LABELS[m]}</option>
           ))}
         </select>
-        <input
+        <AutocompleteInput
           class="mom-input"
           placeholder={match.value === "regex" ? "regular expression" : "value, value, …"}
           value={text.value}
-          onInput={(e) => (text.value = (e.target as HTMLInputElement).value)}
+          onInput={(v) => (text.value = v)}
+          suggestions={match.value === "regex" ? [] : valuePool.value}
         />
         <button class="btn" type="submit" disabled={!text.value.trim()}>
           Add filter

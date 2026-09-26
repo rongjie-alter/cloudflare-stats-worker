@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { createGrid } from "ag-grid-community";
 import type { GridApi, GridOptions, ColDef } from "ag-grid-community";
 import { gridTheme } from "../grid/agGridSetup";
+import { MultiFilter } from "../grid/MultiFilter";
 import { echarts } from "../charts/echarts";
 import { palette, SERIES_COLORS } from "../charts/theme";
 import { CountryMap } from "./CountryMap";
@@ -85,7 +86,7 @@ function DetailGrid({ dimension, rows }: { dimension: Dimension; rows: Aggregate
         headerName: DIMENSION_LABELS[dimension],
         field: "key" as const,
         flex: 2,
-        filter: true,
+        filter: MultiFilter,
         sortable: true,
         ...(dimension === "country" && { valueFormatter: (p) => countryName(p.value) }),
       },
@@ -240,7 +241,7 @@ function HierarchyGrid({ levels, tree }: { levels: Dimension[]; tree: HierarchyN
         valueGetter: (p: any) =>
           dim === "country" ? countryName(p.data?.path[i]) : p.data?.path[i],
         flex: 1,
-        filter: true,
+        filter: MultiFilter,
         sortable: true,
       })),
       {
