@@ -30,7 +30,21 @@
     return "/api/send";
   }
 
+  function is404() {
+    // Navigation Timing L2 reports the page's own response status. Not yet
+    // supported in Safari, where responseStatus stays 0 — in that case we
+    // can't tell, so we don't block the send.
+    try {
+      var nav = performance.getEntriesByType("navigation")[0];
+      return !!nav && nav.responseStatus === 404;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function send() {
+    if (is404()) return;
+
     var endpoint = resolveEndpoint();
     var body = JSON.stringify({
       path: location.pathname,
