@@ -47,6 +47,14 @@ function clean(value) {
   return s ? s : UNKNOWN;
 }
 
+// Browser version is stored as major version only (e.g. "153" from
+// "153.0.8010.24") -- point releases don't change what web features are
+// supported and only bloat the dimension table / widen the dashboard.
+function majorVersion(value) {
+  if (value === UNKNOWN) return value;
+  return value.split(".")[0] || UNKNOWN;
+}
+
 /**
  * Parse a User-Agent into normalized OS / browser / device dimensions.
  * device.type is normalized to 'desktop' when ua-parser-js leaves it undefined.
@@ -59,7 +67,7 @@ export function parseUserAgent(userAgent) {
 
   return {
     os: { name: clean(os.name), version: clean(os.version) },
-    browser: { name: clean(browser.name), version: clean(browser.version) },
+    browser: { name: clean(browser.name), version: majorVersion(clean(browser.version)) },
     device: {
       type: device.type ? clean(device.type) : "desktop",
       vendor: clean(device.vendor),
