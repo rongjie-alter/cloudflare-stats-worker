@@ -96,6 +96,10 @@ export function LiveMap({ countryCounts }: { countryCounts: Record<string, numbe
 
     const pulseDots = dots.filter((d) => pulses.current.has(d.name));
 
+    // Merge mode (no notMerge flag): a full replace would drop the geo
+    // component's zoom/center, snapping the map back whenever a pageview lands
+    // while the user is zoomed in or panned. Series are matched by name, so
+    // their data arrays are still replaced wholesale.
     chart.current.setOption(
       {
         tooltip: {
@@ -131,8 +135,7 @@ export function LiveMap({ countryCounts }: { countryCounts: Record<string, numbe
             data: pulseDots,
           },
         ],
-      },
-      true
+      }
     );
   }, [ready, countryCounts, themeVal, tick]);
 
