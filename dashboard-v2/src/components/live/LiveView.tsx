@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { LiveMap } from "./LiveMap";
-import { LivePathBreakdown } from "./LivePathBreakdown";
+import { LiveBreakdown } from "./LiveBreakdown";
 import { LiveStats } from "./LiveStats";
 import { LiveTimeline } from "./LiveTimeline";
 
@@ -19,6 +19,7 @@ export interface MinuteBucket {
 interface LiveState {
   pageViews: number;
   pathCounts: Record<string, number>;
+  referrerCounts: Record<string, number>;
   countryCounts: Record<string, number>;
   visitorIds: Set<string>;
   minuteBuckets: Map<number, MinuteBucket>;
@@ -30,6 +31,7 @@ function emptyState(): LiveState {
   return {
     pageViews: 0,
     pathCounts: {},
+    referrerCounts: {},
     countryCounts: {},
     visitorIds: new Set(),
     minuteBuckets: new Map(),
@@ -74,10 +76,12 @@ export default function LiveView() {
       setState((prev) => {
         const visitorId = String(msg.visitorId);
         const path = msg.path || "/";
+        const referrer = msg.referrerDomain || "(direct)";
         const country = msg.country || "XX";
         const minute = Math.floor(Number(msg.ts) / 60000);
 
         const pathCounts = { ...prev.pathCounts, [path]: (prev.pathCounts[path] || 0) + 1 };
+        const referrerCounts = { ...prev.referrerCounts, [referrer]: (prev.referrerCounts[referrer] || 0) + 1 };
         const countryCounts = { ...prev.countryCounts, [country]: (prev.countryCounts[country] || 0) + 1 };
         const visitorIds = new Set(prev.visitorIds);
         visitorIds.add(visitorId);
@@ -95,6 +99,7 @@ export default function LiveView() {
         return {
           pageViews: prev.pageViews + 1,
           pathCounts,
+          referrerCounts,
           countryCounts,
           visitorIds,
           minuteBuckets,
@@ -126,7 +131,10 @@ export default function LiveView() {
       <LiveTimeline buckets={state.minuteBuckets} minutes={TIMELINE_MINUTES} />
       <div class="live-grid">
         <LiveMap countryCounts={state.countryCounts} />
-        <LivePathBreakdown pathCounts={state.pathCounts} />
+        <div class="live-col">
+          <LiveBreakdown title="Page views by path" counts={state.pathCounts} />
+          <LiveBreakdown title="Page views by referrer" counts={state.referrerCounts} />
+        </div>
       </div>
     </div>
   );

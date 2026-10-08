@@ -220,6 +220,7 @@ html[data-theme="dark"] .date-picker-inputs input[type="date"] { color-scheme: d
 .live-dot.connecting { background: #f5a524; }
 .live-dot.closed { background: var(--danger); }
 .live-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }
+.live-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .live-message { color: var(--muted); font-size: 14px; padding: 40px 0; text-align: center; }
 
 @media (max-width: 900px) {

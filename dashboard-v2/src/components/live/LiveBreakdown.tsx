@@ -1,7 +1,7 @@
 const MAX_ROWS = 10;
 
-export function LivePathBreakdown({ pathCounts }: { pathCounts: Record<string, number> }) {
-  const rows = Object.entries(pathCounts)
+export function LiveBreakdown({ title, counts }: { title: string; counts: Record<string, number> }) {
+  const rows = Object.entries(counts)
     .map(([key, value]) => ({ key, value }))
     .sort((a, b) => b.value - a.value)
     .slice(0, MAX_ROWS);
@@ -10,7 +10,7 @@ export function LivePathBreakdown({ pathCounts }: { pathCounts: Record<string, n
   return (
     <div class="panel">
       <div class="panel-head">
-        <h3>Page views by path</h3>
+        <h3>{title}</h3>
       </div>
       {rows.length === 0 && <div class="empty">No pageviews yet</div>}
       <div class="rows">
