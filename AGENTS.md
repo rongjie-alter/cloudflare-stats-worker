@@ -11,7 +11,7 @@ A single worker — a **Hono** app composed in `src/index.ts`, written in TypeSc
 **Storage:**
 - **D1 (`DB`, database `cloudflare_stats_db`)** — single source of truth. Raw one-row-per-pageview fact table `events_tab` (hot 6-month window) + dictionary `dim_*_tab` lookup tables + rollups (`site_daily_tab`, `dim_daily_tab`, `hier_daily_tab`) + `meta_tab` bookkeeping + `events_monthly_tab` archive.
 
-**Metrics:** PV = `COUNT(*)`, UV = `COUNT(DISTINCT visitor_id)` over `events_tab`. UV is not additive across dimensions, which is why raw `visitor_id` rows are kept (enables exact arbitrary-dimension UV).
+**Metrics:** PV = `COUNT(*)`, UV = `COUNT(DISTINCT visitor_id)` over `events_tab`, **per day**. Visitor ids are salted with a secret that is random per local day and deleted afterwards (see "Visitor ids"), so the same person has a different id every day. A distinct count over several days would just be the sum of the daily ones, so UV is a **daily metric**: ranges report the avg / min / max of daily UV, and breakdown rows report *average daily visitors* (distinct per group per day, summed, divided by the days in the range; a single day is the exact count). UV is also not additive across dimensions, which is why raw `visitor_id` rows are kept.
 
 ## Read path — this is the part that matters
 
@@ -25,12 +25,12 @@ D1's free tier allows **5M rows read/day**. At 5–10K pageviews/day, reading br
 | Sunburst hierarchy | `hier_daily_tab`, one statement for all levels | ~150 |
 | Trend chart, unfiltered | `site_daily_tab` | ~7 |
 | Headline PV cards | `site_daily_tab` + today live + archive | ~180 |
-| Headline UV cards (7d/30d/all-time) | `meta_tab` snapshot | 1 |
-| **Anything filtered, or any multi-day `metric=visitors`** | **`events_tab`, exactly as before** | full range (filtered: capped at 8 days, see below) |
+| Headline UV cards (7d/30d/all-time): avg/min/max daily UV | `site_daily_tab.uv` (sealed days only; today is the Today card) | same rows as the PV cards |
+| **Anything filtered, or any `metric=visitors`** | **`events_tab`, exactly as before** | full range (filtered: capped at 8 days, see below) |
 
 **Sealed vs live.** Rollup rows are written once, by the nightly cron, after a day has closed — never incremented. Today is always read live from `events_tab` and merged into the same statement, so it is never stale. Maintaining rollups at ingest time was rejected: it would cost ~14 extra rows written per pageview against a 100K/day free write budget that ingest already spends ~30K of.
 
-**Rollups store PV only.** `COUNT(DISTINCT)` is not summable across days — nor across a hierarchy's deeper levels — and both failures would be silent. So unique visitors are always answered from `events_tab` and stay exact. The one precomputed UV is per-day site-wide (`site_daily_tab.uv`), which the read path never sums across days.
+**Rollups store PV only.** `COUNT(DISTINCT)` is not summable across days — nor across a hierarchy's deeper levels — and both failures would be silent. So per-group visitors are always answered from `events_tab` and stay exact. The one precomputed UV is per-day site-wide (`site_daily_tab.uv`); the read path only takes avg/min/max of it across days, never a sum presented as a distinct count.
 
 **Coverage is explicit.** `meta_tab.rollup_min_day` / `rollup_max_day` bound the sealed window, and it is kept *contiguous*. A query starting before `rollup_min_day` bypasses the rollups entirely rather than returning a partial count. Sealing walks backwards a few days per night (`ROLLUP_BACKFILL_DAYS_PER_RUN`), so coverage of older history improves over time; until then those queries are correct but slow.
 
@@ -38,7 +38,7 @@ D1's free tier allows **5M rows read/day**. At 5–10K pageviews/day, reading br
 
 **Caching.** `[cache] enabled = true` in every wrangler config. This matters: the older `caches.default` API is a **no-op on `*.workers.dev`** — `put()` resolves, `match()` always misses — so before this the 30s cache had never once worked. Handlers drive it via `Cache-Control`: 24h for a date range that has already closed (it can never change), 5m for anything touching today.
 
-**Freshness contract:** pageviews are exact and live everywhere. `today.uv` is exact and live. `last7d`/`last30d`/`allTime` UV come from a snapshot, dated by `uv_as_of` in the `/api/summary` response and labelled in the UI — 7d/30d refresh nightly, all-time weekly (it is a 1.35M-row scan and moves &lt;1%/day).
+**Freshness contract:** pageviews are exact and live everywhere. `today.uv` is exact and live. `last7d`/`last30d`/`allTime` UV are `{ avg, min, max, days }` of the per-day UV over the *closed* days in the window (today is excluded: a partial day would skew them), read from `site_daily_tab`. There is no UV snapshot any more, so the old nightly 7d/30d and weekly all-time `COUNT(DISTINCT)` scans are gone. All-time covers the retained window only.
 
 ## Naming convention
 
@@ -50,7 +50,7 @@ D1 database uses a `_db` suffix; every table uses a `_tab` suffix (`events_tab`,
 |---|---|
 | `src/index.ts` | Wiring only: the Hono `app`, `export default { fetch, scheduled }`, Durable Object exports, `notFound` (SPA fallback) and `onError` (masks unexpected failures) |
 | `src/routes/*.ts` | One Hono sub-app per endpoint group: `collect` (ingest), `query`, `timeseries`, `summary`, `archive`, `realtime`, `system` (`/health`, `/api/config`), `assets` (SPA + security headers) |
-| `src/services/*.ts` | `query-plan` (rollup-vs-raw routing + the SQL), `rollup` (seal/extend), `uv-snapshot`, `retention` (aggregate a month, then prune it day by day within a write budget), `archive-export` (R2 window), `maintenance` (the cron, sequencing the others), `meta` (`meta_tab` + isolate cache + the min/max bound upserts), `dims` (`getDimId`), `filters`, `record-event` |
+| `src/services/*.ts` | `query-plan` (rollup-vs-raw routing + the SQL), `rollup` (seal/extend), `visitor-salt` (daily salt + visitor id hash + purge), `retention` (aggregate a month, then prune it day by day within a write budget), `archive-export` (R2 window), `maintenance` (the cron, sequencing the others), `meta` (`meta_tab` + isolate cache + the min/max bound upserts), `dims` (`getDimId`), `filters`, `record-event` |
 | `src/db/schema.ts` | The drizzle schema — the source of truth for every table and index. See "Database schema & migrations" |
 | `src/middleware.ts`, `src/http.ts`, `src/env.ts` | Config/CORS/db middleware; `jsonResponse`, `cacheHeaders`, TTLs, `NO_STORE`; the Hono `AppEnv` type |
 | `src/lib/days.ts`, `src/lib/path.ts`, `src/lib/params.ts` | yyyymmdd day arithmetic; `normalizePath`; query-string parsing (`resolveRange`, `clampInt`) |
@@ -68,7 +68,7 @@ D1 database uses a `_db` suffix; every table uses a `_tab` suffix (`events_tab`,
 | `src/archive.ts` | Parquet archive: schema v1, R2 key layout, encoder built on `hyparquet-writer` (shared with the Node scripts, which import it as `.ts` — Node strips the types natively) |
 | `src/archive-do.ts` | `ArchiveWriter` Durable Object — runs the encode, D1 in / R2 out |
 | `src/dimensions.ts` | `DIMENSIONS` whitelist (name -> FK column, dim table), shared by the query API and the archive |
-| `scripts/verify-archive.mjs` | Recounts archived Parquet days and diffs PV + UV per dimension against the raw D1 path |
+| `scripts/verify-archive.mjs` | Recounts archived Parquet days and diffs PV + average daily UV per dimension against the raw D1 path |
 | `scripts/bench-archive.mjs` | Encoder CPU benchmark (synthetic 7.5K/15K-row days) |
 | `dashboard-v2/src/duck/` | DuckDB-Wasm engine (`db.ts`: range loading, the `events` view, imports, export), Reports queries (`report.ts`) and filter compiler (`sql.ts`) |
 | `dashboard-v2/src/state/range.ts` | Pure date-range math for the pickers (presets, compare ranges, week start); `range.test.ts` runs under `node --test` |
@@ -111,22 +111,33 @@ Per-IP ingest rate limiting is enforced by the Workers **Rate Limiting binding**
 
 ## Ingestion & bot exclusion
 
-`/api/send` reads UA (server-side), IP, and `request.cf.country`; referrer comes from the beacon payload (`document.referrer`). Bots/AI crawlers are always dropped (`src/ua.ts`: regex + ua-parser-js Crawlers extension). Visitor id = first 13 hex of `SHA-256(ip|userAgent)` as a 52-bit int. The event write runs in `ctx.waitUntil`. Dimension ids are resolved via an isolate-global get-or-create cache.
+`/api/send` reads UA (server-side), IP, and `request.cf.country`; referrer comes from the beacon payload (`document.referrer`). Bots/AI crawlers are always dropped (`src/ua.ts`: regex + ua-parser-js Crawlers extension). Visitor id = first 13 hex of `HMAC-SHA256(daily salt, ip|userAgent)` as a 52-bit int (see "Visitor ids"). The event write runs in `ctx.waitUntil`. Dimension ids are resolved via an isolate-global get-or-create cache.
+
+## Visitor ids (daily salt)
+
+`src/services/visitor-salt.ts`. Visitor id = first 13 hex of `HMAC-SHA256(salt, ip|userAgent)`, where `salt` is 32 random bytes **per local day** (the same `day` written to `events_tab.day`, never UTC — a different boundary would split one reported day across two id spaces and inflate its UV).
+
+- **Storage:** `meta_tab` key `visitor_salt:YYYYMMDD`. Get-or-create mirrors `getDimId` (SELECT → INSERT DO NOTHING → SELECT), cached per isolate for the day: one read per cold isolate per day, one written row per day. `readMeta` skips these keys so nothing else ever sees a salt.
+- **Destruction:** the cron's first step deletes every salt older than today (a salt lives ~24.5 h). Once gone, stored ids cannot be brute-forced back to an IP (the IPv4 space is tiny) nor linked across days. Today's salt exists in D1, so same-day ids are reversible by someone with D1 access; the protection is for everything older.
+- **Fails safe:** if D1 is unreachable the Worker uses an isolate-local random salt (never persisted) and logs. A D1 outage costs UV accuracy, never privacy, and drops no pageview. It never falls back to an unsalted hash.
+- **No migration:** every per-day figure (`site_daily_tab.uv`, the trend, `COUNT(DISTINCT) GROUP BY day`) is identical under the old stable ids and the new salted ones, so old and new days mix freely in D1, the Parquet archive and imported files. The Parquet schema (`visitor_id INT64`) is unchanged.
+- **Consequence:** never present a distinct count across days as "unique visitors". `events_monthly_tab.uv` is the sum of daily uniques (visitor-days) for months aggregated after this change, and nothing reads it. Reports (DuckDB) computes per-day distinct first and averages.
+- One-off after deploying: `python scripts/manage.py run-sql scripts/sql/drop-uv-snapshot.sql --all` removes the obsolete `uv_snapshot` row.
 
 ## Retention & rollup (cron)
 
 `scheduled` (cron `30 15 * * *` = 00:30 Asia/Tokyo) is the only trigger — the free plan allows 5 cron triggers **per account** and the deployments already use one each, so adding a second schedule is not available. Each run:
 
+0. **Purges** every past daily visitor salt (first on purpose: a failure in a later step must not skip it).
 1. **Seals** every closed day not yet sealed, up to yesterday, into all three rollups. Always re-seals the last 2 days (ingest writes are fire-and-forget via `ctx.waitUntil`, so stragglers land late) and resumes from `rollup_max_day` so the sealed window stays contiguous — capped at `MAX_SEAL_DAYS_PER_RUN`.
 2. **Extends** coverage backwards a few days (`extendRollupHistory`).
-3. **Refreshes** the UV snapshot: 7d/30d nightly, all-time on Sundays.
-4. **Prunes** raw events older than 6 whole months, **oldest day first within a write budget** (`PRUNE_WRITES_PER_RUN`, `src/services/retention.ts`). A D1 delete bills **one** written row per row removed, however many indexes the table has (measured, `docs/plan-overview-reports.md` Phase 0), so deleting a month at once (~127K events on the busiest site) is still more than the account's 100K/day budget and would make ingest drop pageviews on every site. Instead, per night:
+3. **Prunes** raw events older than 6 whole months, **oldest day first within a write budget** (`PRUNE_WRITES_PER_RUN`, `src/services/retention.ts`). A D1 delete bills **one** written row per row removed, however many indexes the table has (measured, `docs/plan-overview-reports.md` Phase 0), so deleting a month at once (~127K events on the busiest site) is still more than the account's 100K/day budget and would make ingest drop pageviews on every site. Instead, per night:
    - On the first day of a month it writes that month's `events_monthly_tab` aggregate while all its raw rows still exist, deletes the month's `site_daily_tab` rows and moves `rollup_min_day` past it, in one transaction, and records `meta_tab.prune_agg_month`. Leaving a `site_daily_tab` row behind would make the all-time PV card count that day twice while its raw rows linger. The marker stops the aggregate being recomputed from a half-deleted month.
    - Then, per day, it deletes the day's `dim_daily_tab` / `hier_daily_tab` rows and its `events_tab` rows (`WHERE id IN (SELECT id ... WHERE day = ? LIMIT ?)`, bounded by what is left of the budget). Each deleted row is counted as 1 written row, so with the 30K budget a month drains in about 4–5 nights. Only the monthly-aggregate *insert* is charged per index (read from `sqlite_master`).
    - `extendRollupHistory` takes the retention cutoff as a floor so it never re-seals an expired day whose month is already aggregated.
    - **Skipped** for any day the Parquet archive does not cover yet (when an R2 bucket is bound), so raw rows are never destroyed before they reach R2.
    - `node scripts/test-prune.mjs` proves, on a throwaway local D1, that a month pruned over several runs ends in the same state as the old one-batch prune, and that all-time PV never changes between runs.
-5. **Exports** closed days to the Parquet archive — see below.
+4. **Exports** closed days to the Parquet archive — see below.
 
 The archive probe is `SELECT MIN(day) FROM events_tab WHERE day < ?`. It used to be `SELECT DISTINCT (day / 100) ... WHERE (day / 100) < ?`, which wrapped the indexed column in an expression so `idx_events_day` could not be used: a **~1.35M-row full scan every single night**, even when there was nothing to archive. Verified with `EXPLAIN QUERY PLAN` — `SCAN ... USE TEMP B-TREE FOR DISTINCT` became `SEARCH events_tab USING COVERING INDEX idx_events_day (day<?)`.
 
@@ -228,7 +239,7 @@ python scripts/manage.py migrate [name|--all]   # apply to deployments (remote; 
 - **`WITHOUT ROWID` is hand-edited into the SQL.** `dim_daily_tab`, `hier_daily_tab` and `meta_tab` must be `WITHOUT ROWID`: a rowid table with a composite primary key bills **two** written rows per upsert instead of one, and the nightly seal writes thousands. drizzle cannot express it (no support in the versions installed; checked `drizzle-orm` 0.45 / `drizzle-kit` 0.31), so `0000_baseline.sql` carries the clause by hand and `scripts/check-migrations.mjs` replays all migrations and fails if a guarded table's latest `CREATE TABLE` lacks it. Changing one of those tables' *primary key* makes drizzle-kit emit a table recreate that silently drops the clause — re-add it.
 - **Existing databases are adopted, not migrated.** `0000_baseline.sql` describes the schema the deployed databases already have, so run `python scripts/manage.py baseline [name|--all]` once per existing database: it checks `sqlite_master` against the baseline (reporting drift, e.g. a missing `idx_events_day_ref`), then *records* `0000` in `d1_migrations` without running it. Running it would be harmless for tables but would create `idx_events_day_ref` wherever it is absent — a write per existing row (which `0001` then drops). `--dry-run` reports only. After baselining, `migrate` should say "No migrations to apply". Fresh databases (`manage.py init`) just run `0000`.
 - **Cosmetic differences from the old `schema.sql`:** dimension uniqueness is now an explicit `dim_*_tab_value_unique` index instead of an inline `UNIQUE` auto-index (same behaviour, same write cost), and column attributes are ordered `DEFAULT 0 NOT NULL`. `manage.py baseline` does not treat the missing unique indexes as drift.
-- **The query builder is for simple CRUD only** (ingest, dimension lookups, `meta_tab` reads, the UV-snapshot upsert). The rollup / `UNION ALL` / window-function / `ON CONFLICT ... CASE` statements stay raw `db.$client.prepare()` SQL so their read and write cost is exactly what was measured. `resolveLabels` must stay raw too: it interpolates validated integer ids because D1 caps bound parameters at 100, and `inArray()` binds.
+- **The query builder is for simple CRUD only** (ingest, dimension lookups, `meta_tab` reads, the daily-salt get-or-create). The rollup / `UNION ALL` / window-function / `ON CONFLICT ... CASE` statements stay raw `db.$client.prepare()` SQL so their read and write cost is exactly what was measured. `resolveLabels` must stay raw too: it interpolates validated integer ids because D1 caps bound parameters at 100, and `inArray()` binds.
 - One-off, untracked SQL (backfills, the opt-in index, destructive drops) lives in `scripts/sql/` and runs through `manage.py run-sql <file> [name|--all] [--local]`.
 
 ### Exporting for local analysis

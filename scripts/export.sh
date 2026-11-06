@@ -60,14 +60,18 @@ Done. ${SQLITE_DB}
   sqlite3 ${SQLITE_DB}
 
 Cross-filtered questions the hosted dashboard cannot answer, e.g. visitors per
-country for one path -- exact, and free:
+country for one path -- exact, and free. Visitor ids are salted per day, so
+count distinct visitors PER DAY and average them (a distinct count across days
+would only be the sum of the daily ones):
 
-  SELECT c.value AS country, COUNT(DISTINCT e.visitor_id) AS uv
-  FROM events_tab e
-  JOIN dim_path_tab p    ON p.id = e.path_id
-  JOIN dim_country_tab c ON c.id = e.country_id
-  WHERE p.value = '/some/page/'
-  GROUP BY c.value ORDER BY uv DESC;
+  SELECT country, AVG(uv) AS avg_daily_uv FROM (
+    SELECT c.value AS country, e.day, COUNT(DISTINCT e.visitor_id) AS uv
+    FROM events_tab e
+    JOIN dim_path_tab p    ON p.id = e.path_id
+    JOIN dim_country_tab c ON c.id = e.country_id
+    WHERE p.value = '/some/page/'
+    GROUP BY c.value, e.day
+  ) GROUP BY country ORDER BY avg_daily_uv DESC;
 
 For heavier work, DuckDB reads SQLite directly and gives you GROUPING SETS,
 QUALIFY and approx_count_distinct, none of which SQLite has:

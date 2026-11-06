@@ -3,7 +3,8 @@
 //
 // Downloads every archived day in [from, to] through the worker's own
 // /api/archive endpoints, recounts it from the Parquet files alone, and diffs
-// against /api/query -- per dimension, for both pageviews and visitors. The
+// against /api/query -- per dimension, for both pageviews and visitors (average
+// DAILY visitors: ids are salted per day, so there is no cross-day distinct count). The
 // query side is forced onto the raw events_tab path with a no-op exclude token
 // (as verify-rollup.mjs does), so this compares the archive to the raw rows,
 // not to a rollup of them.
@@ -63,22 +64,30 @@ const pv = await getJSON(
 const apiTotal = pv.results.reduce((s, r) => s + r.value, 0);
 check("total pageviews", apiTotal === rows.length, `api=${apiTotal} parquet=${rows.length}`);
 
-// Per-dimension breakdowns, pageviews and exact unique visitors.
+// Calendar days in [from, to]: the API divides by this (a day with no traffic is 0).
+const SPAN = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+const round1 = (n) => Math.round(n * 10) / 10;
+
+// Per-dimension breakdowns: pageviews and average daily visitors.
 for (const dim of DIMENSION_NAMES) {
   const pvBy = new Map();
-  const uvBy = new Map();
+  const uvBy = new Map(); // key -> Map(day -> Set(visitor_id))
   for (const r of rows) {
     const key = r[dim] ?? NULL_LABEL(dim);
     pvBy.set(key, (pvBy.get(key) ?? 0) + 1);
-    if (!uvBy.has(key)) uvBy.set(key, new Set());
-    uvBy.get(key).add(r.visitor_id);
+    if (!uvBy.has(key)) uvBy.set(key, new Map());
+    const perDay = uvBy.get(key);
+    if (!perDay.has(r.day)) perDay.set(r.day, new Set());
+    perDay.get(r.day).add(r.visitor_id);
   }
   for (const metric of ["pageviews", "visitors"]) {
     const api = await getJSON(
       `/api/query?metric=${metric}&from=${from}&to=${to}&group_by=${dim}&limit=200` +
         `&exclude=${dim}:__nonexistent_sentinel__`
     );
-    const mine = metric === "pageviews" ? pvBy : new Map([...uvBy].map(([k, s]) => [k, s.size]));
+    const mine = metric === "pageviews" ? pvBy : new Map(
+            [...uvBy].map(([k, perDay]) => [k, round1([...perDay.values()].reduce((a, s) => a + s.size, 0) / SPAN)])
+          );
     // The API caps at 200 groups; compare exactly those, and the group count
     // whenever it is below the cap.
     for (const { key, value } of api.results) {
@@ -95,4 +104,4 @@ if (failures) {
   console.error(`FAILED: ${failures} mismatch(es)`);
   process.exit(1);
 }
-console.log(`OK: ${rows.length} pageviews match D1 exactly across ${DIMENSION_NAMES.length} dimensions (PV + UV).`);
+console.log(`OK: ${rows.length} pageviews match D1 exactly across ${DIMENSION_NAMES.length} dimensions (PV + average daily UV).`);

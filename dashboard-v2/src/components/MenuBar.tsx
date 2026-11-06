@@ -25,7 +25,7 @@ function MetricSwitcher() {
   return (
     <div class="segmented" role="group" aria-label="Metric">
       {opt("pageviews", "Page Views")}
-      {opt("visitors", "Visitors")}
+      {opt("visitors", "Daily Visitors")}
     </div>
   );
 }

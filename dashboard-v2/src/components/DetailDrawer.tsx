@@ -26,7 +26,13 @@ const source = (): DrawerSource => ({
   exact: false,
   comparing: false,
   rowLimits: { flat: FLAT_LIMIT, tuples: HIERARCHY_TUPLE_LIMIT },
-  metricLabel: metric.value === "visitors" ? "Visitors" : "Page Views",
+  // Visitor ids are salted per day: over several days a row is the average per day.
+  metricLabel:
+    metric.value === "visitors"
+      ? timeRange.value.from === timeRange.value.to
+        ? "Visitors"
+        : "Avg daily visitors"
+      : "Page Views",
   onDimensionChange: openDrawer,
   onClose: closeDrawer,
   // The bridge for any question Overview cannot answer: same range, and whatever

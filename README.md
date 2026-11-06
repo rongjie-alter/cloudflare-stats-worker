@@ -12,8 +12,8 @@
 
 - **Edge-native** — one Worker serves the ingest + query API *and* the dashboard SPA (Workers Static Assets).
 - **Rich dimensions** — OS, OS version, browser, browser version, device type/vendor/model, country, referrer (domain + path).
-- **Cookieless & bot-free** — visitor id = truncated `SHA-256(ip|ua)`; bots/AI crawlers are always excluded (`ua-parser-js`).
-- **D1 as source of truth** — raw event fact table gives exact PV **and** UV under arbitrary filtering.
+- **Cookieless & bot-free** — visitor id = truncated `HMAC-SHA256(daily salt, ip|ua)` with a salt that is random per day and deleted after ~24 h, so ids cannot be linked across days or reversed to an IP; bots/AI crawlers are always excluded (`ua-parser-js`).
+- **D1 as source of truth** — raw event fact table gives exact PV **and** daily UV under arbitrary filtering.
 - **Retention that fits** — day-level detail for 6 months, auto-archived to month-level by a nightly cron; designed to stay well under 500 MB at 10k pv/day.
 - **Reusable** — one site per deployment via config: worker domain, allowed origin, rate limit, timezone.
 
@@ -28,8 +28,8 @@ Dashboard SPA at /  ◄── Static Assets ── Worker
 Cron (nightly) ──► refresh site_daily_tab, archive+prune >6mo ──► events_monthly_tab
 ```
 
-- **PV** = `COUNT(*)`, **UV** = `COUNT(DISTINCT visitor_id)` over `events_tab`.
-- Because UV isn't additive across dimensions, `total` for the visitors metric is computed over the whole filtered set (never summed from groups).
+- **PV** = `COUNT(*)`, **UV** = `COUNT(DISTINCT visitor_id)` over `events_tab`, per day (ids differ every day).
+- UV is a daily metric. For the visitors metric, each row and `total` is the *average daily visitors* over the range (a single day is the exact count), and `daily` carries the site-wide `avg`/`min`/`max`. `total` is never the sum of the groups.
 
 See [`CLAUDE.md`](CLAUDE.md) for the full schema, key files, and conventions.
 

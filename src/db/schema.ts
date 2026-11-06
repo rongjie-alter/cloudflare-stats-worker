@@ -9,17 +9,19 @@
 //   * site_daily_tab     per-day PV/UV rollup (headline cards + trend chart)
 //   * dim_daily_tab      per-day, per-dimension rollup (dimension breakdowns)
 //   * hier_daily_tab     per-day rollup of the 3 drill-down hierarchies (sunburst)
-//   * meta_tab           rollup coverage bounds + periodic all-time UV snapshot
+//   * meta_tab           rollup coverage bounds, archive window, daily visitor salts
 //   * events_monthly_tab archive of data older than 6 months (EAV long-format)
 //
 // PV = COUNT(*) over events_tab. UV = COUNT(DISTINCT visitor_id) over events_tab
-// (not additive across dimensions, which is why raw visitor_id rows are kept for
-// the hot window).
+// PER DAY: visitor ids are salted per day (src/services/visitor-salt.ts), so a
+// distinct count across days is only the sum of the daily ones. UV is not
+// additive across dimensions either, which is why raw visitor_id rows are kept
+// for the hot window.
 //
 // READ PATH: no dashboard endpoint scans the full events_tab. The rollups cover
 // every sealed (past) day; today is read live from events_tab and merged in at
 // query time. events_tab is scanned over the whole range only when a query is
-// filtered, or asks for exact unique visitors across more than one day.
+// filtered, or asks for visitors (average daily visitors per group).
 //
 // !! WITHOUT ROWID !!  dim_daily_tab, hier_daily_tab and meta_tab are
 // `WITHOUT ROWID` in the deployed databases: a rowid table with a composite
@@ -86,7 +88,7 @@ export const dimTables: Record<DimensionName, typeof dimPathTab> = {
 // "today" reads, the per-day archive export and the per-day prune.
 //
 // There used to be (day, country), (day, path) and (day, ref_domain) composites
-// for the raw-scan fallback (filtered queries, multi-day visitors). Nothing
+// for the raw-scan fallback (filtered queries, visitors). Nothing
 // filters on D1 over more than 8 days any more -- Overview filters in the browser
 // and Reports runs on Parquet -- so they only cost writes: 4-5 down to 2 per
 // pageview. Migration 0001 drops them; scripts/sql/add-referrer-index.sql, which
@@ -96,7 +98,7 @@ export const eventsTab = sqliteTable(
   {
     id: integer("id").primaryKey(), // rowid
     day: integer("day").notNull(), // yyyymmdd in configured TZ, e.g. 20260719
-    visitorId: integer("visitor_id").notNull(), // first 13 hex of SHA-256(ip|ua) as 52-bit int
+    visitorId: integer("visitor_id").notNull(), // first 13 hex of HMAC-SHA256(daily salt, ip|ua) as 52-bit int
     pathId: integer("path_id").notNull(),
     refDomainId: integer("ref_domain_id"), // NULL = direct / no referrer
     countryId: integer("country_id"),
@@ -119,7 +121,7 @@ export const eventsTab = sqliteTable(
 export const siteDailyTab = sqliteTable("site_daily_tab", {
   day: integer("day").primaryKey(), // yyyymmdd
   pv: integer("pv").notNull().default(0),
-  uv: integer("uv").notNull().default(0), // exact per-day distinct visitors
+  uv: integer("uv").notNull().default(0), // exact per-day distinct visitors (read as avg/min/max, never summed)
 });
 
 // ---------------------------------------------------------------------------
@@ -176,7 +178,7 @@ export const hierDailyTab = sqliteTable(
 // ---------------------------------------------------------------------------
 // Small key/value store for rollup bookkeeping and periodic snapshots.
 //   rollup_min_day / rollup_max_day   sealed-window bounds
-//   uv_snapshot                       JSON { as_of, uv ... } for the headline cards
+//   visitor_salt:YYYYMMDD             the day's random visitor-id salt; purged nightly
 //   archive_min_day / archive_max_day Parquet archive window
 // WITHOUT ROWID: see the note at the top.
 // ---------------------------------------------------------------------------
@@ -187,8 +189,10 @@ export const metaTab = sqliteTable("meta_tab", {
 
 // ---------------------------------------------------------------------------
 // Monthly archive for data older than 6 months (raw rows pruned after rollup).
-// EAV long-format: one row per (month, dimension, value). uv is EXACT per single
-// (dimension, value) but NOT summable and NOT cross-filterable -- that detail is
+// EAV long-format: one row per (month, dimension, value). uv is the sum of the
+// per-day distinct counts (visitor-days) for months aggregated after the daily
+// salt was introduced -- ids no longer link across days -- and a true monthly
+// distinct count for older ones. It is NOT cross-filterable: that detail is
 // destroyed on prune. The per-month grand total lives in the ('total','') row.
 // ---------------------------------------------------------------------------
 export const eventsMonthlyTab = sqliteTable(

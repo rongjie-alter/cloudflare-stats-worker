@@ -8,7 +8,7 @@ import { exportArchive } from "./archive-export.ts";
 import { META_MAX_DAY, invalidateMetaCache, readMeta } from "./meta.ts";
 import { pruneExpiredDays, retentionCutoff } from "./retention.ts";
 import { extendRollupHistory, sealDays } from "./rollup.ts";
-import { refreshUvSnapshot } from "./uv-snapshot.ts";
+import { purgeVisitorSalts } from "./visitor-salt.ts";
 
 // Forward catch-up bound, for when nightly runs were missed. Keeps the sealed
 // window contiguous without letting one run scan an unbounded backlog.
@@ -25,6 +25,11 @@ export async function runMaintenance(env: Env): Promise<void> {
   const tz = config.timezone;
   const today = localDay(tz);
   const yesterday = offsetDayInt(today, -1);
+
+  // 0) Destroy every past daily visitor salt. First on purpose: this is the
+  //    privacy guarantee (stored visitor ids can no longer be reversed to an IP),
+  //    so a failure in a later step must not be able to skip it.
+  await purgeVisitorSalts(db, today);
 
   // 1) Seal every closed day up to yesterday that is not sealed yet.
   //
@@ -50,14 +55,11 @@ export async function runMaintenance(env: Env): Promise<void> {
   //    correctly, just via a raw scan, so this is a pure speed-up over time.
   await extendRollupHistory(db, retentionCutoff(today));
 
-  // 3) Refresh the unique-visitor snapshot the headline cards read.
-  await refreshUvSnapshot(db, tz, today);
-
-  // 4) Archive + prune raw events older than 6 whole months, oldest day first,
+  // 3) Archive + prune raw events older than 6 whole months, oldest day first,
   //    within a nightly write budget (a month can take a fortnight to drain).
   await pruneExpiredDays(env, db, today);
 
-  // 5) Write closed days to the Parquet archive in R2. Last on purpose: it is
+  // 4) Write closed days to the Parquet archive in R2. Last on purpose: it is
   //    the only step that can fail for reasons outside D1 (R2, the Durable
   //    Object), and nothing above depends on it -- except the prune guard,
   //    which fails safe by keeping data.

@@ -248,7 +248,7 @@ export default function ReportsView() {
       }),
     exact: true,
     comparing: loaded.compare !== null,
-    metricLabel: metric === "uv" ? "Visitors" : "Page Views",
+    metricLabel: metric === "uv" ? "Avg daily visitors" : "Page Views",
     onRowFilter: toggleRowFilter,
     onDimensionChange: (d) => (reportDrawer.value = d),
     onClose: () => (reportDrawer.value = null),
@@ -380,7 +380,7 @@ export default function ReportsView() {
             Page Views
           </button>
           <button class={metric === "uv" ? "active" : ""} onClick={() => (reportMetric.value = "uv")}>
-            Visitors
+            Daily Visitors
           </button>
         </div>
         <span class="spacer" />

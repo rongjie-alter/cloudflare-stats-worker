@@ -11,6 +11,7 @@ import {
   planQuery,
   queryViaRaw,
   queryViaRollup,
+  type DailyStats,
   type Metric,
   type ResultRow,
 } from "../services/query-plan.ts";
@@ -53,11 +54,11 @@ query.all("/api/query", withDb, async (c) => {
   if (filters.matchesNothing) return queryResponse(metric, from, to, config, groupBy, [], 0);
 
   const plan = await planQuery(db, config, { metric, groupBy, from: scanFrom, to, filtered: filters.binds.length > 0 });
-  const { rows, total } = plan.rollup
-    ? await queryViaRollup(db, plan, limit)
+  const { rows, total, daily } = plan.rollup
+    ? { ...(await queryViaRollup(db, plan, limit)), daily: undefined }
     : await queryViaRaw(db, plan, filters.clause, filters.binds, limit);
 
-  return queryResponse(metric, from, to, config, groupBy, rows, total);
+  return queryResponse(metric, from, to, config, groupBy, rows, total, daily);
 });
 
 function queryResponse(
@@ -67,7 +68,8 @@ function queryResponse(
   config: Config,
   groupBy: DimensionName[],
   rows: ResultRow[],
-  total: number
+  total: number,
+  daily?: DailyStats
 ): Response {
   const envelope: Record<string, unknown> = {
     metric,
@@ -79,7 +81,12 @@ function queryResponse(
     total,
   };
   if (metric === "visitors") {
-    envelope.note = "total is distinct visitors over the filtered set; it is not the sum of per-group values (UV is not additive).";
+    // Visitor ids are salted per day, so there is no cross-day distinct count: each
+    // value (and `total`) is the average DAILY visitors over the range, and a
+    // single-day range is the exact distinct count.
+    envelope.note =
+      "values are average daily visitors over the range (ids are unlinkable across days); total is the site-wide average, not the sum of the per-group values.";
+    envelope.daily = daily ?? { avg: 0, min: 0, max: 0 };
   }
   return jsonResponse(envelope, 200, cacheHeaders(to, config));
 }

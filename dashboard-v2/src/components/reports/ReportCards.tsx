@@ -25,10 +25,11 @@ export function ReportCards({
   labelPrev: string;
 }) {
   const perDay = (t: Totals) => (t.days ? t.pv / t.days : 0);
-  const card = (label: string, vc: number, vp: number | null, digits = 0) => (
+  const card = (label: string, vc: number, vp: number | null, digits = 0, note?: string) => (
     <div class="card">
       <div class="label">{label}</div>
       <div class="value">{fmt(vc, digits)}</div>
+      {note && <div class="sub">{note}</div>}
       {vp !== null && (
         <>
           <div class="sub">
@@ -44,7 +45,7 @@ export function ReportCards({
   return (
     <div class="cards">
       {card("Page views", cur.pv, prev ? prev.pv : null)}
-      {card("Unique visitors", cur.uv, prev ? prev.uv : null)}
+      {card("Avg daily visitors", cur.uv, prev ? prev.uv : null, 1, `min ${fmt(cur.uvMin)} · max ${fmt(cur.uvMax)}`)}
       {card("Page views / day", perDay(cur), prev ? perDay(prev) : null, 1)}
       {card("Days with data", cur.days, prev ? prev.days : null)}
     </div>

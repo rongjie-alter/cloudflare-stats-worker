@@ -7,6 +7,7 @@ import { jsonResponse } from "../http.ts";
 import { normalizePath } from "../lib/path.ts";
 import { getRealtimeHub } from "../services/realtime-hub.ts";
 import { recordEvent } from "../services/record-event.ts";
+import { visitorIdFor } from "../services/visitor-salt.ts";
 import { isBot, parseReferrer, parseUserAgent } from "../ua.ts";
 import { withDb } from "../middleware.ts";
 
@@ -29,6 +30,7 @@ collect.post("/api/send", withDb, async (c) => {
   // Trust only CF-Connecting-IP: it is set by Cloudflare and cannot be spoofed.
   // (x-forwarded-for is client-supplied -- using it would let attackers rotate
   // the rate-limit key and forge visitor identity.)
+  // The IP is only ever an input to the salted hash; it is never stored.
   const ip = (request.headers.get("CF-Connecting-IP") || "0.0.0.0").trim();
   await enforceRateLimit(c.env, ip);
 
@@ -50,8 +52,9 @@ collect.post("/api/send", withDb, async (c) => {
   const ua = parseUserAgent(userAgent);
   const ref = parseReferrer(payload.referrer || "", config.allowedOrigin);
   const country: string = (request.cf?.country as string | undefined) || "XX";
-  const visitorId = await getVisitorId(ip, userAgent);
   const day = localDay(config.timezone);
+  // Salted per local day: ids are unlinkable across days (see visitor-salt.ts).
+  const visitorId = await visitorIdFor(c.var.db, day, ip, userAgent);
 
   c.executionCtx.waitUntil(
     recordEvent(c.var.db, { day, visitorId, path, ref, country, ua }).catch((err) =>
@@ -98,12 +101,4 @@ async function enforceRateLimit(env: Env, ip: string): Promise<void> {
   if (!limiter) return;
   const { success } = await limiter.limit({ key: ip });
   if (!success) throw new HTTPException(429, { message: "Rate limit exceeded" });
-}
-
-async function getVisitorId(ip: string, userAgent: string): Promise<number> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${ip}|${userAgent}`));
-  const bytes = new Uint8Array(digest);
-  let hex = "";
-  for (let i = 0; i < 7; i += 1) hex += bytes[i].toString(16).padStart(2, "0");
-  return parseInt(hex.slice(0, 13), 16); // 52-bit int, safe for JS Number
 }

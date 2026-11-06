@@ -1,12 +1,13 @@
 // meta_tab: the small key/value store holding rollup coverage, the Parquet
-// archive window and the UV snapshot (see src/db/schema.ts).
+// archive window and the daily visitor salts (see src/db/schema.ts).
+import { notLike } from "drizzle-orm";
 import { metaTab } from "../db/schema.ts";
 import type { Db } from "../db/client.ts";
 import { firstDayOfNextMonth } from "../lib/days.ts";
+import { VISITOR_SALT_PREFIX } from "./visitor-salt.ts";
 
 export const META_MIN_DAY = "rollup_min_day"; // earliest sealed day; before it -> raw
 export const META_MAX_DAY = "rollup_max_day"; // latest sealed day (normally yesterday)
-export const META_UV_SNAPSHOT = "uv_snapshot"; // JSON { as_of, uv } for the all-time card
 // Latest month (yyyymm) whose events_monthly_tab aggregate has been written. A
 // month is pruned over several nights, so this is what stops the aggregate being
 // recomputed from a half-deleted month.
@@ -36,7 +37,10 @@ export async function readMeta(db: Db): Promise<Meta> {
   if (metaCache.value && now - metaCache.at < META_CACHE_MS) return metaCache.value;
   const out: Meta = {};
   try {
-    for (const row of await db.select().from(metaTab).all()) out[row.key] = row.value;
+    // Never carry the daily visitor salts: nothing but visitor-salt.ts may see them.
+    for (const row of await db.select().from(metaTab).where(notLike(metaTab.key, `${VISITOR_SALT_PREFIX}%`)).all()) {
+      out[row.key] = row.value;
+    }
   } catch {
     // meta_tab absent (deployment predates the rollup migration) -> no coverage,
     // so every query takes the raw path and stays correct.

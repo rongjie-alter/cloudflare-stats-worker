@@ -2,7 +2,7 @@
 import { localDay, type Config } from "../config.ts";
 import { DIMENSIONS, nullLabelFor, type DimensionName } from "../dimensions.ts";
 import type { Db } from "../db/client.ts";
-import { offsetDayInt } from "../lib/days.ts";
+import { eachDaySpan, offsetDayInt } from "../lib/days.ts";
 import { META_MAX_DAY, META_MIN_DAY, readMeta } from "./meta.ts";
 import { HIERARCHIES, NULL_VALUE_ID } from "./rollup.ts";
 
@@ -38,6 +38,15 @@ export interface ResultRow {
   value: number;
 }
 
+// Site-wide daily visitors over the (filtered) range, for metric=visitors.
+export interface DailyStats {
+  avg: number;
+  min: number;
+  max: number;
+}
+
+const round1 = (n: number): number => Math.round(n * 10) / 10;
+
 // Decide where a query is answered from, and split the range accordingly.
 //
 // Rollup-eligible queries read sealed days from dim_daily_tab/hier_daily_tab and
@@ -49,7 +58,7 @@ export interface ResultRow {
 //   * metric=visitors -- the rollups store PV only, precisely so that no code
 //                        path can silently sum COUNT(DISTINCT) across days (or,
 //                        for a partial hierarchy, across its deeper levels).
-//                        Unique visitors are always exact, via events_tab.
+//                        Daily visitors are always exact, via events_tab.
 //   * a range starting before the sealed window -- partial data would silently
 //                        under-report, so fall back rather than lie
 export async function planQuery(
@@ -151,49 +160,78 @@ export async function queryViaRollup(
 // Raw path -- extended to group by up to 3 dimensions in a single statement.
 // Replaces the sunburst's per-node fan-out (which issued up to 261 requests / 522
 // range scans for one click) with one scan.
+//
+// metric=visitors is a DAILY metric: visitor ids are salted per day, so a distinct
+// count across days would only be the sum of the daily ones. Each row is instead
+// its average DAILY visitors over the range -- distinct visitors per (group, day),
+// summed over the days and divided by the number of calendar days in the range
+// (a day with no traffic for a group counts as 0). For a single day that is the
+// exact distinct count.
 export async function queryViaRaw(
   db: Db,
   plan: QueryPlan,
   where: string,
   binds: number[],
   limit: number
-): Promise<{ rows: ResultRow[]; total: number }> {
+): Promise<{ rows: ResultRow[]; total: number; daily?: DailyStats }> {
   const { groupBy, from, to, metric } = plan;
   const d1 = db.$client;
   const cols = groupBy.map((d) => DIMENSIONS[d].col);
   const sel = cols.map((c, i) => `COALESCE(e.${c}, ${NULL_VALUE_ID}) AS k${i}`).join(", ");
   const grp = cols.map((c) => `e.${c}`).join(", ");
-  const agg = metric === "visitors" ? "COUNT(DISTINCT e.visitor_id)" : "COUNT(*)";
+  const keyList = cols.map((_, i) => `k${i}`).join(", ");
 
-  // COUNT(DISTINCT) is not summable, so visitors still needs its own total
-  // statement. COUNT(*) rides along as a window function for free.
-  const totalExpr = metric === "visitors" ? "" : ", SUM(COUNT(*)) OVER () AS total";
+  if (metric === "visitors") {
+    // Today is a partial day but is part of the range, like the trend chart.
+    const span = Math.max(1, eachDaySpan(from, Math.max(from, Math.min(to, plan.today))));
+    const [{ results }, perDay] = await Promise.all([
+      d1
+        .prepare(
+          `WITH d AS (SELECT ${sel}, e.day AS day, COUNT(DISTINCT e.visitor_id) AS u FROM events_tab e ` +
+            `WHERE e.day BETWEEN ? AND ?${where} GROUP BY ${grp}, e.day) ` +
+            `SELECT ${keyList}, SUM(u) * 1.0 / ? AS value FROM d GROUP BY ${keyList} ORDER BY value DESC LIMIT ?`
+        )
+        .bind(from, to, ...binds, span, limit)
+        .all<KeyedRow>(),
+      d1
+        .prepare(
+          `SELECT COUNT(DISTINCT e.visitor_id) AS u FROM events_tab e WHERE e.day BETWEEN ? AND ?${where} GROUP BY e.day`
+        )
+        .bind(from, to, ...binds)
+        .all<{ u: number }>(),
+    ]);
+    const counts = perDay.results.map((r) => Number(r.u));
+    const sum = counts.reduce((a, b) => a + b, 0);
+    const daily: DailyStats = {
+      avg: round1(sum / span),
+      // A day with no matching traffic is a 0, so it is the minimum.
+      min: counts.length < span ? 0 : counts.length ? Math.min(...counts) : 0,
+      max: counts.length ? Math.max(...counts) : 0,
+    };
+    if (results.length === 0) return { rows: [], total: daily.avg, daily };
+    const labels = await resolveLabels(db, groupBy, results, cols.length);
+    const rows = results.map((r) => ({
+      keys: groupBy.map((d, i) => labels[i].get(Number(r[`k${i}`])) ?? nullLabelFor(d)),
+      value: round1(Number(r.value)),
+    }));
+    return { rows, total: daily.avg, daily };
+  }
+
   const sql =
-    `SELECT ${sel}, ${agg} AS value${totalExpr} FROM events_tab e ` +
+    `SELECT ${sel}, COUNT(*) AS value, SUM(COUNT(*)) OVER () AS total FROM events_tab e ` +
     `WHERE e.day BETWEEN ? AND ?${where} GROUP BY ${grp} ORDER BY value DESC LIMIT ?`;
   const { results } = await d1
     .prepare(sql)
     .bind(from, to, ...binds, limit)
     .all<KeyedRow>();
 
-  let total = 0;
-  if (metric === "visitors") {
-    const row = await d1
-      .prepare(`SELECT COUNT(DISTINCT e.visitor_id) AS value FROM events_tab e WHERE e.day BETWEEN ? AND ?${where}`)
-      .bind(from, to, ...binds)
-      .first<{ value: number }>();
-    total = row ? Number(row.value) : 0;
-  } else if (results.length > 0) {
-    total = Number(results[0].total);
-  }
-
-  if (results.length === 0) return { rows: [], total };
+  if (results.length === 0) return { rows: [], total: 0 };
   const labels = await resolveLabels(db, groupBy, results, cols.length);
   const rows = results.map((r) => ({
     keys: groupBy.map((d, i) => labels[i].get(Number(r[`k${i}`])) ?? nullLabelFor(d)),
     value: Number(r.value),
   }));
-  return { rows, total };
+  return { rows, total: Number(results[0].total) };
 }
 
 // One `WHERE id IN (...)` per grouped dimension, over the returned rows only.
