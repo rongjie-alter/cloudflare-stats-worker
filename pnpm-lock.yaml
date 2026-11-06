@@ -43,7 +43,7 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
       vite:
-        specifier: ^8.3.1
+        specifier: ^8.3.3
         version: 8.3.4(esbuild@0.28.1)(tsx@4.23.15)
       wrangler:
         specifier: ^4.110.0
