@@ -50,10 +50,8 @@ export interface QueryResponse {
   range: { from: string; to: string; timezone: string };
   group_by: Dimension;
   results: AggregateRow[];
-  total: number;
+  total?: number; // pageviews only: visitors have no cross-day total
   note?: string;
-  // metric=visitors only: site-wide daily visitors over the range.
-  daily?: { avg: number; min: number; max: number };
 }
 
 // Response shape when group_by names more than one dimension.
@@ -62,7 +60,7 @@ export interface TupleQueryResponse {
   range: { from: string; to: string; timezone: string };
   group_by: Dimension[];
   results: TupleRow[];
-  total: number;
+  total?: number; // pageviews only: visitors have no cross-day total
   note?: string;
 }
 

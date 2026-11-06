@@ -14,17 +14,18 @@ export interface Where {
 // Visitors are a DAILY metric: ids are salted per day on the server, so the same
 // person has a different visitor_id every day and a distinct count over several
 // days would only be the sum of the daily ones. Every `uv` below is therefore
-// computed per day first and then averaged over the range's days. A "day" is any
-// day in the range that has events at all, whatever the filters, so a day on which
+// computed per day first and then averaged over the range's days. The average's
+// denominator is every day in the range that has events at all, whatever the
+// filters (the same definition as /api/query and /api/summary), so a day on which
 // nothing matched the filters counts as 0 visitors rather than being skipped.
 // (Days stored before the salt existed have stable ids, but their per-day distinct
 // counts are identical, so old and new days mix freely.)
 export interface Totals {
   pv: number;
   uv: number; // average daily visitors
-  uvMin: number; // fewest visitors on any day
+  uvMin: number; // fewest visitors on any day (0 if a day had no match)
   uvMax: number; // most visitors on any day
-  days: number; // days with data
+  days: number; // days with data that MATCH the filters; page views / day divides by it
 }
 
 export interface TrendPoint {
@@ -62,7 +63,7 @@ export async function totals(range: DayRange, where: Where): Promise<Totals> {
             CAST(COALESCE(AVG(COALESCE(p.uv, 0)), 0) AS DOUBLE) AS uv,
             CAST(COALESCE(MIN(COALESCE(p.uv, 0)), 0) AS BIGINT) AS "uvMin",
             CAST(COALESCE(MAX(COALESCE(p.uv, 0)), 0) AS BIGINT) AS "uvMax",
-            COUNT(*) AS days
+            COUNT(p.day) AS days
      FROM days d LEFT JOIN per p ON p.day = d.day`,
     [range.from, range.to, range.from, range.to, ...where.params]
   );

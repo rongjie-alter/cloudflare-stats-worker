@@ -89,11 +89,13 @@ export async function visitorIdFor(db: Db, day: number, ip: string, userAgent: s
 
 // Run by the nightly cron (00:30 local): everything older than today goes. Nothing
 // needs a past salt -- ids are hashed at ingest -- so a salt lives about 24.5 h.
-// 'visitor_salt:' + an 8-digit day sorts correctly as text.
+// 'visitor_salt:' + an 8-digit day sorts correctly as text, so this is a plain
+// primary-key range: no LIKE (whose `_` is a wildcard, and which cannot use the
+// index), and every key in [prefix, prefix + today) starts with the prefix.
 export async function purgeVisitorSalts(db: Db, today: number): Promise<void> {
   await db.$client
-    .prepare("DELETE FROM meta_tab WHERE key LIKE ? AND key < ?")
-    .bind(`${VISITOR_SALT_PREFIX}%`, `${VISITOR_SALT_PREFIX}${today}`)
+    .prepare("DELETE FROM meta_tab WHERE key >= ? AND key < ?")
+    .bind(VISITOR_SALT_PREFIX, `${VISITOR_SALT_PREFIX}${today}`)
     .run();
   // A stale in-isolate key for a past day is harmless: it is only used for that day.
 }

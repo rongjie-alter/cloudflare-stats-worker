@@ -29,7 +29,7 @@ Cron (nightly) ──► refresh site_daily_tab, archive+prune >6mo ──► ev
 ```
 
 - **PV** = `COUNT(*)`, **UV** = `COUNT(DISTINCT visitor_id)` over `events_tab`, per day (ids differ every day).
-- UV is a daily metric. For the visitors metric, each row and `total` is the *average daily visitors* over the range (a single day is the exact count), and `daily` carries the site-wide `avg`/`min`/`max`. `total` is never the sum of the groups.
+- UV is a daily metric. For the visitors metric, each row is the *average daily visitors* over the days with traffic in the range (a single day is the exact count). There is no `total`, since it would never be the sum of the groups.
 
 See [`CLAUDE.md`](CLAUDE.md) for the full schema, key files, and conventions.
 

@@ -28,8 +28,15 @@ export async function runMaintenance(env: Env): Promise<void> {
 
   // 0) Destroy every past daily visitor salt. First on purpose: this is the
   //    privacy guarantee (stored visitor ids can no longer be reversed to an IP),
-  //    so a failure in a later step must not be able to skip it.
-  await purgeVisitorSalts(db, today);
+  //    so a failure in a later step must not be able to skip it. The reverse also
+  //    holds: a failed purge must not skip sealing, pruning or the archive export.
+  //    It is safe to just log and carry on -- the purge deletes everything older
+  //    than today, so the next night's run removes whatever this one missed.
+  try {
+    await purgeVisitorSalts(db, today);
+  } catch (err) {
+    console.error("[worker] visitor salt purge failed; retrying next run", err);
+  }
 
   // 1) Seal every closed day up to yesterday that is not sealed yet.
   //

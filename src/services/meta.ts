@@ -1,10 +1,9 @@
 // meta_tab: the small key/value store holding rollup coverage, the Parquet
 // archive window and the daily visitor salts (see src/db/schema.ts).
-import { notLike } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { metaTab } from "../db/schema.ts";
 import type { Db } from "../db/client.ts";
 import { firstDayOfNextMonth } from "../lib/days.ts";
-import { VISITOR_SALT_PREFIX } from "./visitor-salt.ts";
 
 export const META_MIN_DAY = "rollup_min_day"; // earliest sealed day; before it -> raw
 export const META_MAX_DAY = "rollup_max_day"; // latest sealed day (normally yesterday)
@@ -14,6 +13,18 @@ export const META_MAX_DAY = "rollup_max_day"; // latest sealed day (normally yes
 export const META_PRUNE_AGG_MONTH = "prune_agg_month";
 export const META_ARCHIVE_MIN_DAY = "archive_min_day";
 export const META_ARCHIVE_MAX_DAY = "archive_max_day";
+
+// The only keys readMeta returns. An allow-list rather than "everything but the
+// daily visitor salts": nothing but visitor-salt.ts may ever see a salt, and this
+// way that holds for any key added to meta_tab later, without meta.ts knowing the
+// salt prefix.
+const READABLE_META_KEYS = [
+  META_MIN_DAY,
+  META_MAX_DAY,
+  META_PRUNE_AGG_MONTH,
+  META_ARCHIVE_MIN_DAY,
+  META_ARCHIVE_MAX_DAY,
+];
 
 export type Meta = Record<string, string>;
 
@@ -37,8 +48,7 @@ export async function readMeta(db: Db): Promise<Meta> {
   if (metaCache.value && now - metaCache.at < META_CACHE_MS) return metaCache.value;
   const out: Meta = {};
   try {
-    // Never carry the daily visitor salts: nothing but visitor-salt.ts may see them.
-    for (const row of await db.select().from(metaTab).where(notLike(metaTab.key, `${VISITOR_SALT_PREFIX}%`)).all()) {
+    for (const row of await db.select().from(metaTab).where(inArray(metaTab.key, READABLE_META_KEYS)).all()) {
       out[row.key] = row.value;
     }
   } catch {

@@ -53,38 +53,47 @@ collect.post("/api/send", withDb, async (c) => {
   const ref = parseReferrer(payload.referrer || "", config.allowedOrigin);
   const country: string = (request.cf?.country as string | undefined) || "XX";
   const day = localDay(config.timezone);
-  // Salted per local day: ids are unlinkable across days (see visitor-salt.ts).
-  const visitorId = await visitorIdFor(c.var.db, day, ip, userAgent);
-
-  c.executionCtx.waitUntil(
-    recordEvent(c.var.db, { day, visitorId, path, ref, country, ua }).catch((err) =>
-      console.error("[worker] recordEvent error", err)
-    )
-  );
-
-  // Best-effort forward to the live-dashboard relay. Fully isolated from the
-  // D1 write above: a missing binding, a cold/erroring Durable Object, or a
-  // disconnected viewer must never affect ingest or D1 recording.
+  const db = c.var.db;
   const realtime = getRealtimeHub(c.env);
-  if (realtime) {
-    c.executionCtx.waitUntil(
-      realtime
-        .ingest({
-          path,
-          country,
-          browser: ua.browser.name,
-          browserVersion: ua.browser.version,
-          os: ua.os.name,
-          osVersion: ua.os.version,
-          deviceType: ua.device.type,
-          deviceVendor: ua.device.vendor,
-          deviceModel: ua.device.model,
-          referrerDomain: ref.domain,
-          visitorId,
-        })
-        .catch((err: unknown) => console.error("[worker] realtime ingest error", err))
-    );
-  }
+
+  // Everything below runs after the 204 has gone out. The visitor id needs the
+  // day's salt, which on a cold isolate is a D1 read (and, on the first pageview
+  // of the day, a write) -- the beacon has no use for that latency, so it must
+  // not sit in front of the response.
+  c.executionCtx.waitUntil(
+    (async () => {
+      // Salted per local day: ids are unlinkable across days (see visitor-salt.ts).
+      const visitorId = await visitorIdFor(db, day, ip, userAgent);
+
+      // The realtime relay is best-effort and fully isolated from the D1 write: a
+      // missing binding, a cold/erroring Durable Object, or a disconnected viewer
+      // must never affect ingest or D1 recording.
+      const forward = realtime
+        ? realtime
+            .ingest({
+              path,
+              country,
+              browser: ua.browser.name,
+              browserVersion: ua.browser.version,
+              os: ua.os.name,
+              osVersion: ua.os.version,
+              deviceType: ua.device.type,
+              deviceVendor: ua.device.vendor,
+              deviceModel: ua.device.model,
+              referrerDomain: ref.domain,
+              visitorId,
+            })
+            .catch((err: unknown) => console.error("[worker] realtime ingest error", err))
+        : Promise.resolve();
+
+      await Promise.all([
+        recordEvent(db, { day, visitorId, path, ref, country, ua }).catch((err) =>
+          console.error("[worker] recordEvent error", err)
+        ),
+        forward,
+      ]);
+    })().catch((err) => console.error("[worker] ingest error", err))
+  );
 
   return new Response(null, { status: 204, headers: corsHeaders });
 });

@@ -2,7 +2,7 @@
 import { localDay, type Config } from "../config.ts";
 import { DIMENSIONS, nullLabelFor, type DimensionName } from "../dimensions.ts";
 import type { Db } from "../db/client.ts";
-import { eachDaySpan, offsetDayInt } from "../lib/days.ts";
+import { offsetDayInt } from "../lib/days.ts";
 import { META_MAX_DAY, META_MIN_DAY, readMeta } from "./meta.ts";
 import { HIERARCHIES, NULL_VALUE_ID } from "./rollup.ts";
 
@@ -36,13 +36,6 @@ export type QueryPlan = RawPlan | RollupPlan;
 export interface ResultRow {
   keys: string[];
   value: number;
-}
-
-// Site-wide daily visitors over the (filtered) range, for metric=visitors.
-export interface DailyStats {
-  avg: number;
-  min: number;
-  max: number;
 }
 
 const round1 = (n: number): number => Math.round(n * 10) / 10;
@@ -164,16 +157,18 @@ export async function queryViaRollup(
 // metric=visitors is a DAILY metric: visitor ids are salted per day, so a distinct
 // count across days would only be the sum of the daily ones. Each row is instead
 // its average DAILY visitors over the range -- distinct visitors per (group, day),
-// summed over the days and divided by the number of calendar days in the range
-// (a day with no traffic for a group counts as 0). For a single day that is the
-// exact distinct count.
+// summed over the days and divided by the number of DAYS WITH TRAFFIC in the range
+// (a day on which nothing matched the group/filter counts as 0). That is the same
+// denominator as /api/summary and the Reports tab, so one range shows one number
+// everywhere. For a single day it is the exact distinct count. There is no
+// site-wide `total`: it is not the sum of the rows, and no consumer reads one.
 export async function queryViaRaw(
   db: Db,
   plan: QueryPlan,
   where: string,
   binds: number[],
   limit: number
-): Promise<{ rows: ResultRow[]; total: number; daily?: DailyStats }> {
+): Promise<{ rows: ResultRow[]; total?: number }> {
   const { groupBy, from, to, metric } = plan;
   const d1 = db.$client;
   const cols = groupBy.map((d) => DIMENSIONS[d].col);
@@ -182,39 +177,37 @@ export async function queryViaRaw(
   const keyList = cols.map((_, i) => `k${i}`).join(", ");
 
   if (metric === "visitors") {
-    // Today is a partial day but is part of the range, like the trend chart.
-    const span = Math.max(1, eachDaySpan(from, Math.max(from, Math.min(to, plan.today))));
-    const [{ results }, perDay] = await Promise.all([
+    // Days with traffic, whatever the filters, found by hopping the day index
+    // (MIN(day) > previous) instead of scanning it: ~1 row read per day, not per
+    // pageview. Today is a partial day but is part of the range, like the trend.
+    const [{ results }, daysRow] = await Promise.all([
       d1
         .prepare(
           `WITH d AS (SELECT ${sel}, e.day AS day, COUNT(DISTINCT e.visitor_id) AS u FROM events_tab e ` +
             `WHERE e.day BETWEEN ? AND ?${where} GROUP BY ${grp}, e.day) ` +
-            `SELECT ${keyList}, SUM(u) * 1.0 / ? AS value FROM d GROUP BY ${keyList} ORDER BY value DESC LIMIT ?`
+            `SELECT ${keyList}, SUM(u) AS sum_u FROM d GROUP BY ${keyList} ORDER BY sum_u DESC LIMIT ?`
         )
-        .bind(from, to, ...binds, span, limit)
+        .bind(from, to, ...binds, limit)
         .all<KeyedRow>(),
       d1
         .prepare(
-          `SELECT COUNT(DISTINCT e.visitor_id) AS u FROM events_tab e WHERE e.day BETWEEN ? AND ?${where} GROUP BY e.day`
+          `WITH RECURSIVE ds(day) AS (` +
+            `SELECT MIN(day) FROM events_tab WHERE day BETWEEN ? AND ? ` +
+            `UNION ALL ` +
+            `SELECT (SELECT MIN(day) FROM events_tab WHERE day > ds.day AND day <= ?) FROM ds WHERE ds.day IS NOT NULL` +
+            `) SELECT COUNT(day) AS n FROM ds`
         )
-        .bind(from, to, ...binds)
-        .all<{ u: number }>(),
+        .bind(from, to, to)
+        .first<{ n: number }>(),
     ]);
-    const counts = perDay.results.map((r) => Number(r.u));
-    const sum = counts.reduce((a, b) => a + b, 0);
-    const daily: DailyStats = {
-      avg: round1(sum / span),
-      // A day with no matching traffic is a 0, so it is the minimum.
-      min: counts.length < span ? 0 : counts.length ? Math.min(...counts) : 0,
-      max: counts.length ? Math.max(...counts) : 0,
-    };
-    if (results.length === 0) return { rows: [], total: daily.avg, daily };
+    if (results.length === 0) return { rows: [] };
+    const days = Math.max(1, daysRow ? Number(daysRow.n) : 0);
     const labels = await resolveLabels(db, groupBy, results, cols.length);
     const rows = results.map((r) => ({
       keys: groupBy.map((d, i) => labels[i].get(Number(r[`k${i}`])) ?? nullLabelFor(d)),
-      value: round1(Number(r.value)),
+      value: round1(Number(r.sum_u) / days),
     }));
-    return { rows, total: daily.avg, daily };
+    return { rows };
   }
 
   const sql =
