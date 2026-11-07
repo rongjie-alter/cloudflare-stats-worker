@@ -104,10 +104,15 @@ export function LiveMap({ countryCounts }: { countryCounts: Record<string, numbe
       {
         tooltip: {
           trigger: "item",
-          formatter: (o: any) => `${countryName(o.name)}: ${o.value?.[2] ?? 0}`,
+          // Hovering a bare country (geo region) carries no value, and dots
+          // carry [lon, lat, count]; the count map covers both.
+          formatter: (o: any) => `${countryName(o.name)}: ${countryCounts[o.name] ?? 0}`,
         },
         geo: {
           map: "world",
+          // The map's regions are keyed by ISO alpha-2 (the GeoJSON has no
+          // `name` property), so without this a hovered region has no name.
+          nameProperty: "ISO_A2_EH",
           roam: true,
           itemStyle: { areaColor: noDataColor, borderColor: p.grid },
           emphasis: { itemStyle: { areaColor: noDataColor } },
