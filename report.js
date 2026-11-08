@@ -30,6 +30,11 @@
     return "/api/send";
   }
 
+  // document.currentScript is only set while the script first executes; it is
+  // null by the time the delayed send fires (timer / promise / pagehide), which
+  // used to fall back to the host site's own /api/send. Resolve it once, here.
+  var ENDPOINT = resolveEndpoint();
+
   function is404() {
     // Navigation Timing L2 reports the page's own response status. Not yet
     // supported in Safari, where responseStatus stays 0 — in that case we
@@ -96,7 +101,7 @@
   }
 
   function post(uach) {
-    var endpoint = resolveEndpoint();
+    var endpoint = ENDPOINT;
     var payload = {
       path: location.pathname,
       referrer: document.referrer || "",
