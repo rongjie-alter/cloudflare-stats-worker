@@ -10,7 +10,8 @@
     "dev": "wrangler dev",
     "deploy": "pnpm --dir dashboard-v2 build && wrangler deploy",
     "build:dashboard": "pnpm --dir dashboard-v2 build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "node --test src/*.test.ts",
     "cf-typegen": "wrangler types --strict-vars=false --include-runtime=false",
     "db:generate": "drizzle-kit generate && node scripts/check-migrations.mjs",
     "db:check": "drizzle-kit check && node scripts/check-migrations.mjs",
@@ -28,6 +29,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261102.1",
+    "@types/node": "^24.19.2",
     "drizzle-kit": "^0.31.11",
     "hyparquet": "^1.31.1",
     "typescript": "^7.0.2",
