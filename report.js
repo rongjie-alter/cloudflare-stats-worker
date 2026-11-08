@@ -70,22 +70,29 @@
   function send() {
     if (is404()) return;
 
-    // Never delay or lose a pageview over the hints: after 1s send without them.
-    // `sent` makes the timeout and the promise race to exactly one request.
+    // Hints are a nicety, the pageview is not: wait for them only briefly, and
+    // never past the moment the visitor leaves. `sent` makes the hint promise,
+    // the timer and the page-hide listeners race to exactly one request.
     var sent = false;
+    var timer;
     function deliver(uach) {
       if (sent) return;
       sent = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      removeEventListener("pagehide", onLeave);
       post(uach);
     }
-    setTimeout(deliver, 1000);
-    try {
-      clientHints().then(deliver, function () {
-        deliver();
-      });
-    } catch (e) {
+    function onLeave() {
       deliver();
     }
+    function onVisibility() {
+      if (document.visibilityState === "hidden") deliver();
+    }
+    timer = setTimeout(onLeave, 300);
+    document.addEventListener("visibilitychange", onVisibility);
+    addEventListener("pagehide", onLeave);
+    clientHints().then(deliver);
   }
 
   function post(uach) {
