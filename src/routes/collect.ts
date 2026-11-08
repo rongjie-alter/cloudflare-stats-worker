@@ -40,7 +40,7 @@ collect.post("/api/send", withDb, async (c) => {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  let payload: { path?: unknown; referrer?: unknown } = {};
+  let payload: { path?: unknown; referrer?: unknown; uach?: unknown } = {};
   try {
     const text = await request.text();
     if (text) payload = JSON.parse(text);
@@ -49,7 +49,7 @@ collect.post("/api/send", withDb, async (c) => {
   }
 
   const path = normalizePath(payload.path || "/");
-  const ua = parseUserAgent(userAgent);
+  const ua = parseUserAgent(userAgent, payload.uach);
   const ref = parseReferrer(payload.referrer || "", config.allowedOrigin);
   const country: string = (request.cf?.country as string | undefined) || "XX";
   const day = localDay(config.timezone);

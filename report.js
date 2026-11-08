@@ -42,14 +42,60 @@
     }
   }
 
+  // Chromium freezes the User-Agent string (Android reports "Android 10; K",
+  // Windows 11 reports "NT 10.0", macOS "10_15_7"), so the real OS version and
+  // device model only exist as User-Agent Client Hints. The model and platform
+  // version are high-entropy hints, available asynchronously from this API.
+  // Resolves with undefined where unsupported (Firefox, Safari) or refused.
+  function clientHints() {
+    var uad = navigator.userAgentData;
+    if (!uad || typeof uad.getHighEntropyValues !== "function") {
+      return Promise.resolve(undefined);
+    }
+    return uad.getHighEntropyValues(["model", "platformVersion"]).then(
+      function (high) {
+        return {
+          platform: uad.platform,
+          mobile: uad.mobile,
+          model: high.model,
+          platformVersion: high.platformVersion,
+        };
+      },
+      function () {
+        return undefined;
+      }
+    );
+  }
+
   function send() {
     if (is404()) return;
 
+    // Never delay or lose a pageview over the hints: after 1s send without them.
+    // `sent` makes the timeout and the promise race to exactly one request.
+    var sent = false;
+    function deliver(uach) {
+      if (sent) return;
+      sent = true;
+      post(uach);
+    }
+    setTimeout(deliver, 1000);
+    try {
+      clientHints().then(deliver, function () {
+        deliver();
+      });
+    } catch (e) {
+      deliver();
+    }
+  }
+
+  function post(uach) {
     var endpoint = resolveEndpoint();
-    var body = JSON.stringify({
+    var payload = {
       path: location.pathname,
       referrer: document.referrer || "",
-    });
+    };
+    if (uach) payload.uach = uach;
+    var body = JSON.stringify(payload);
 
     // Deliver via XMLHttpRequest only. sendBeacon is deliberately avoided: it
     // returns true once the request is merely queued, so a blocker extension

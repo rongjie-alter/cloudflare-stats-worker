@@ -113,6 +113,12 @@ Per-IP ingest rate limiting is enforced by the Workers **Rate Limiting binding**
 
 `/api/send` reads UA (server-side), IP, and `request.cf.country`; referrer comes from the beacon payload (`document.referrer`). Bots/AI crawlers are always dropped (`src/ua.ts`: regex + ua-parser-js Crawlers extension). Visitor id = first 13 hex of `HMAC-SHA256(daily salt, ip|userAgent)` as a 52-bit int (see "Visitor ids"). The event write runs in `ctx.waitUntil`. Dimension ids are resolved via an isolate-global get-or-create cache.
 
+### User-Agent Client Hints
+
+Chromium freezes the UA string (UA reduction): Android Chrome always says `Android 10; K`, Windows 11 says `NT 10.0`, macOS says `10_15_7`. Parsing the header alone therefore records a fake "Android 10 / model K". The real OS version and device model exist only as high-entropy client hints, which cannot be read from request headers here (they need `Accept-CH` on the *site's* HTML, and the beacon is cross-origin).
+
+So `report.js` reads `navigator.userAgentData.getHighEntropyValues(["model","platformVersion"])` and adds `uach: { platform, mobile, model, platformVersion }` to the beacon JSON (still a simple CORS request, no preflight). It sends once the hints resolve, or after 1 s without them. `parseUserAgent(ua, hints)` in `src/ua.ts` treats them as untrusted (client-controlled, they become dimension values): `sanitizeHints` drops anything outside a closed shape (platform from a fixed list, numeric `platformVersion`, printable `model` capped at 10 chars), and the hints are used only when the platform agrees with the UA's own OS and that OS is Android, Windows or macOS (the families whose UA is reduced; a Linux hint would overwrite UA names like `Ubuntu`). The model is taken on Android only. What survives goes to ua-parser-js as `sec-ch-ua-*` header values, then `getOS()` / `getDevice().withClientHints()`. Only Chromium sends hints; Firefox and Safari fall back to the UA string. Browser name/version always come from the UA, and the visitor id hash input stays `ip|userAgent`. Events recorded before this change keep `Android 10 / K` — nothing is rewritten. `node --test src/ua.test.ts` covers it.
+
 ## Visitor ids (daily salt)
 
 `src/services/visitor-salt.ts`. Visitor id = first 13 hex of `HMAC-SHA256(salt, ip|userAgent)`, where `salt` is 32 random bytes **per local day** (the same `day` written to `events_tab.day`, never UTC — a different boundary would split one reported day across two id spaces and inflate its UV).

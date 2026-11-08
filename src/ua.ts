@@ -65,11 +65,93 @@ export interface ParsedUserAgent {
   device: { type: string; vendor: string; model: string };
 }
 
-export function parseUserAgent(userAgent: string): ParsedUserAgent {
-  const parser = new UAParser(userAgent || "");
-  const os = parser.getOS();
+/**
+ * User-Agent Client Hints reported by the beacon (navigator.userAgentData).
+ * Chromium freezes the UA string (Android "10; K", Windows "NT 10.0", macOS
+ * "10_15_7"), so the real OS version and device model only exist as hints.
+ */
+export interface ClientHints {
+  platform?: string;
+  platformVersion?: string;
+  model?: string;
+  mobile?: boolean;
+}
+
+// Platforms navigator.userAgentData reports. Anything else is forged or unknown.
+const HINT_PLATFORMS = new Set(["Android", "Chrome OS", "Chromium OS", "Linux", "macOS", "Windows"]);
+// "14", "14.0.0", "10.0.22631"
+const HINT_VERSION_RE = /^\d+(\.\d+){0,3}$/;
+// Printable model names ("SM-S918B", "Pixel 7", "moto g(60)").
+const HINT_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9 ._+()-]*$/;
+// Models are stored as a dimension, so cap them hard: fewer, shorter values.
+const HINT_MODEL_MAX_LENGTH = 20;
+
+/**
+ * The hints arrive in a client-controlled JSON body and end up as dimension
+ * values, so each field is checked against a closed shape: platform from a fixed
+ * list, version numeric, model printable and short. Anything else is dropped (not
+ * repaired), so a forged value falls back to what the UA string says.
+ */
+export function sanitizeHints(raw: unknown): ClientHints {
+  if (!raw || typeof raw !== "object") return {};
+  const input = raw as Record<string, unknown>;
+  const hints: ClientHints = {};
+  if (typeof input.platform === "string" && HINT_PLATFORMS.has(input.platform)) {
+    hints.platform = input.platform;
+  }
+  if (typeof input.platformVersion === "string" && HINT_VERSION_RE.test(input.platformVersion.trim())) {
+    hints.platformVersion = input.platformVersion.trim();
+  }
+  if (typeof input.model === "string") {
+    const model = input.model.trim();
+    if (HINT_MODEL_RE.test(model)) hints.model = model.slice(0, HINT_MODEL_MAX_LENGTH).trim();
+  }
+  if (typeof input.mobile === "boolean") hints.mobile = input.mobile;
+  return hints;
+}
+
+// Hints only replace what UA reduction froze, and only on the OS families whose
+// UA is actually reduced: Android (version + model), Windows (11 is "NT 10.0"),
+// macOS (always 10_15_7). Linux/ChromeOS UAs are not reduced, and a Linux hint
+// would also overwrite UA-derived names like "Ubuntu". The hint platform must
+// agree with the UA's OS, so hints can never switch a visit to another OS.
+const HINT_OS_FAMILIES = new Set(["Android", "Windows", "macOS"]);
+
+function applicableHints(uaOsName: string | undefined, hints: ClientHints): ClientHints {
+  if (!uaOsName || !HINT_OS_FAMILIES.has(uaOsName) || hints.platform !== uaOsName) return {};
+  const out: ClientHints = { platform: hints.platform };
+  if (hints.platformVersion) out.platformVersion = hints.platformVersion;
+  if (hints.mobile !== undefined) out.mobile = hints.mobile;
+  // Only Android reports a meaningful device model.
+  if (uaOsName === "Android" && hints.model) out.model = hints.model;
+  return out;
+}
+
+// ua-parser-js reads client hints in their HTTP header form (structured-header
+// strings), so serialize ours the same way.
+function hintsToHeaders(hints: ClientHints): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (hints.platform) headers["sec-ch-ua-platform"] = `"${hints.platform}"`;
+  if (hints.platformVersion) headers["sec-ch-ua-platform-version"] = `"${hints.platformVersion}"`;
+  if (hints.model) headers["sec-ch-ua-model"] = `"${hints.model}"`;
+  if (hints.mobile !== undefined) headers["sec-ch-ua-mobile"] = hints.mobile ? "?1" : "?0";
+  return headers;
+}
+
+export function parseUserAgent(userAgent: string, rawHints?: unknown): ParsedUserAgent {
+  let parser = new UAParser(userAgent || "");
+  const hints = applicableHints(parser.getOS().name, sanitizeHints(rawHints));
+  const hasHints = Object.keys(hints).length > 0;
+  if (hasHints) parser = new UAParser(userAgent || "", hintsToHeaders(hints));
   const browser = parser.getBrowser();
-  const device = parser.getDevice();
+  // Only OS and device are overridden: Chrome's major version is not reduced, so
+  // the UA already has the right browser.
+  // withClientHints() is typed as T | PromiseLike<T> because in a browser it awaits
+  // navigator.userAgentData. Workers has no userAgentData, so it is synchronous here.
+  const os = hasHints ? (parser.getOS().withClientHints() as ReturnType<typeof parser.getOS>) : parser.getOS();
+  const device = hasHints
+    ? (parser.getDevice().withClientHints() as ReturnType<typeof parser.getDevice>)
+    : parser.getDevice();
 
   return {
     os: { name: clean(os.name), version: majorVersion(clean(os.version)) },

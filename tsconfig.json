@@ -12,5 +12,6 @@
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["worker-configuration.d.ts", "src", "drizzle.config.ts"]
+  "include": ["worker-configuration.d.ts", "src", "drizzle.config.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }
