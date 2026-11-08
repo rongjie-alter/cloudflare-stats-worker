@@ -25,6 +25,20 @@ export const HIERARCHIES: Record<string, DimensionName[]> = {
 // this many days per run. 3 days x 14 passes ~= 315K rows read, ~6% of budget.
 const ROLLUP_BACKFILL_DAYS_PER_RUN = 3;
 
+// Recompute site_daily_tab for [from, to] from events_tab. Also used on its own by
+// the prune (retention.ts), which seals any expired day the window missed before
+// its raw rows go: site_daily_tab rows are kept forever, for the all-time cards.
+export function sealSiteDaily(d1: D1Database, from: number, to: number): D1PreparedStatement {
+  return d1
+    .prepare(
+      `INSERT INTO site_daily_tab (day, pv, uv)
+       SELECT day, COUNT(*), COUNT(DISTINCT visitor_id) FROM events_tab
+       WHERE day BETWEEN ? AND ? GROUP BY day
+       ON CONFLICT(day) DO UPDATE SET pv = excluded.pv, uv = excluded.uv`
+    )
+    .bind(from, to);
+}
+
 // Recompute the rollups for [from, to] from scratch. Idempotent: every write is
 // an upsert keyed on the natural key, so a day is replaced rather than added to.
 // Bounds are written last so a reader can never see a coverage claim for rows
@@ -62,16 +76,7 @@ export async function sealDays(db: Db, from: number, to: number): Promise<void> 
     );
   }
 
-  statements.push(
-    d1
-      .prepare(
-        `INSERT INTO site_daily_tab (day, pv, uv)
-         SELECT day, COUNT(*), COUNT(DISTINCT visitor_id) FROM events_tab
-         WHERE day BETWEEN ? AND ? GROUP BY day
-         ON CONFLICT(day) DO UPDATE SET pv = excluded.pv, uv = excluded.uv`
-      )
-      .bind(from, to)
-  );
+  statements.push(sealSiteDaily(d1, from, to));
 
   statements.push(raiseMetaMax(d1, META_MAX_DAY, to));
   statements.push(lowerMetaMin(d1, META_MIN_DAY, from));
@@ -83,8 +88,9 @@ export async function sealDays(db: Db, from: number, to: number): Promise<void> 
 // the thing that blows the read budget.
 //
 // `floorDay` is the first retained day. Expired rows can linger while the prune
-// drains over several nights, and their months are already in events_monthly_tab:
-// sealing them again would count them twice.
+// drains over several nights, and their site_daily_tab rows were completed before
+// the first delete: sealing them again would overwrite those rows with whatever
+// part of the day is left.
 export async function extendRollupHistory(db: Db, floorDay: number): Promise<void> {
   const meta = await readMeta(db);
   const minDay = Number(meta[META_MIN_DAY] ?? 0);

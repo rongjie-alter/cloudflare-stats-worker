@@ -7,9 +7,10 @@ import { firstDayOfNextMonth } from "../lib/days.ts";
 
 export const META_MIN_DAY = "rollup_min_day"; // earliest sealed day; before it -> raw
 export const META_MAX_DAY = "rollup_max_day"; // latest sealed day (normally yesterday)
-// Latest month (yyyymm) whose events_monthly_tab aggregate has been written. A
-// month is pruned over several nights, so this is what stops the aggregate being
-// recomputed from a half-deleted month.
+// Latest month (yyyymm) the prune has closed (retention.ts closeMonth): its
+// site_daily_tab rows are final and its raw rows may be partly deleted. A month
+// is pruned over several nights, so this is what stops anything reading or
+// re-sealing a half-deleted month.
 export const META_PRUNE_AGG_MONTH = "prune_agg_month";
 export const META_ARCHIVE_MIN_DAY = "archive_min_day";
 export const META_ARCHIVE_MAX_DAY = "archive_max_day";
@@ -59,8 +60,8 @@ export async function readMeta(db: Db): Promise<Meta> {
   return out;
 }
 
-// First day a range read may scan; 0 when nothing has been pruned. Every month up
-// to prune_agg_month belongs to events_monthly_tab, but its raw rows drain over
+// First day a range read may scan; 0 when nothing has been pruned. Every month
+// up to prune_agg_month has been closed by the prune, but its raw rows drain over
 // several nights, so reading them would return a silently partial count. Days
 // below this floor answer as empty, exactly as they did when a month was deleted
 // in one go.

@@ -15,6 +15,13 @@
       "when": 1793629014042,
       "tag": "0001_melodic_secret_warriors",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794098018609,
+      "tag": "0002_fuzzy_colleen_wing",
+      "breakpoints": true
     }
   ]
 }

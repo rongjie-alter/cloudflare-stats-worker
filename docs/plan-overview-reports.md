@@ -8,7 +8,7 @@ Agreed 2026-11-02. Implemented the same day on branch `hono-drizzle`, uncommitte
 | 1 Range math + picker | Done. `range.test.ts` passes (14 tests) |
 | 2 Overview | Done. Drawer filters locally with its own chips (grid column filter still drives chart/map); server cap = 400 above 8 days when filtered; single-dimension `limit` clamp raised 200 -> 2000 |
 | 3 Reports | Done. Range loading, size preflight (confirm above 50 MB), progress, imports fill gaps via the `events` view, ROLLUP exact UV, compare overlay. `MomCards` / `MomTrend` became `ReportCards` / `ReportTrend` rather than folding into the Overview components; the panel grid and drawer are shared. URL-hash state not done |
-| 4a Budgeted prune | Done, `node scripts/test-prune.mjs`. Differs from the plan: the month's `site_daily_tab` rows go with the aggregate (not per day), because deleting them per day double counts all-time PV while the month drains. Not yet exercised on a remote DB |
+| 4a Budgeted prune | Done, `node scripts/test-prune.mjs`. Differs from the plan: `site_daily_tab` rows are never pruned and `events_monthly_tab` is gone (migration `0002`); the all-time cards read `site_daily_tab` alone. Not yet exercised on a remote DB |
 | 4b.1 Drop composite indexes | Migration `drizzle/0001_*.sql` written, **not applied** anywhere |
 | 4b.2 Skip no-op seal writes | Not done: needs the Phase 0 answer on whether a guarded no-op bills 0 |
 | 4b.3 Stop extending dim rollups | Not done: `rollup_min_day` is one bound shared by all three rollups, so splitting it is a design change of its own |

@@ -25,7 +25,7 @@
 Browser (allowed site) ──report.js──► POST /api/send ──► D1 events_tab (1 row/pageview)
 Dashboard SPA at /  ◄── Static Assets ── Worker
   └─ /api/query · /api/timeseries · /api/summary · /api/config ──► D1 (SELECT/GROUP BY)
-Cron (nightly) ──► refresh site_daily_tab, archive+prune >6mo ──► events_monthly_tab
+Cron (nightly) ──► seal rollups, prune raw events >6mo (site_daily_tab rows kept)
 ```
 
 - **PV** = `COUNT(*)`, **UV** = `COUNT(DISTINCT visitor_id)` over `events_tab`, per day (ids differ every day).
@@ -133,7 +133,7 @@ bash scripts/verify.sh http://127.0.0.1:8787
 
 ## Retention
 
-Raw events are kept day-level for ~6 months. A nightly cron (`30 15 * * *`, i.e. 00:30 Asia/Tokyo) refreshes the `site_daily_tab` rollup and archives older months into `events_monthly_tab` (per-dimension PV/UV — exact per single value, but not cross-filterable once the raw rows are pruned), then deletes the raw rows day by day over the following nights, within a nightly write budget.
+Raw events are kept day-level for ~6 months. A nightly cron (`30 15 * * *`, i.e. 00:30 Asia/Tokyo) refreshes the rollups and deletes expired raw rows day by day, within a nightly write budget. The per-day `site_daily_tab` row (PV and daily UV) is kept forever, so the all-time cards still count pruned days; per-value history lives in the Parquet archive in R2.
 
 ## Cloudflare Zero Trust Access Authentication
 

@@ -1,7 +1,9 @@
 // GET /api/summary -- headline cards (today / 7d / 30d / all-time).
 //
 // PV is live and exact on every card: it is additive, so sealed days come from
-// site_daily_tab (<=180 rows) and today is counted straight off events_tab.
+// site_daily_tab and today is counted straight off events_tab. site_daily_tab
+// keeps its rows after the raw events are pruned (one per day), so the all-time
+// card covers every day ever sealed, not just the retained ~6 months.
 //
 // UV is a DAILY metric. Visitor ids are salted per day (visitor-salt.ts), so the
 // same person has a different id each day and a distinct count over several days
@@ -72,7 +74,7 @@ summary.all("/api/summary", withDb, async (c) => {
           .bind(a, b)
           .first<SealedRow>();
 
-  const [todayRow, unsealed, sealed7, sealed30, sealedAll, archRow] = await Promise.all([
+  const [todayRow, unsealed, sealed7, sealed30, sealedAll] = await Promise.all([
     d1
       .prepare("SELECT COUNT(*) AS pv, COUNT(DISTINCT visitor_id) AS uv FROM events_tab WHERE day = ?")
       .bind(today)
@@ -90,7 +92,6 @@ summary.all("/api/summary", withDb, async (c) => {
     sealed(d7, sealedTo),
     sealed(d30, sealedTo),
     sealed(0, sealedTo),
-    d1.prepare("SELECT COALESCE(SUM(pv),0) AS pv FROM events_monthly_tab WHERE dimension = 'total'").first<{ pv: number }>(),
   ]);
 
   const todayPv = todayRow ? Number(todayRow.pv) : 0;
@@ -123,12 +124,11 @@ summary.all("/api/summary", withDb, async (c) => {
       today: { pv: todayPv, uv: todayRow ? Number(todayRow.uv) : 0 },
       last7d: { pv: windowPv(sealed7, d7), uv: windowUv(sealed7, d7) },
       last30d: { pv: windowPv(sealed30, d30), uv: windowUv(sealed30, d30) },
-      // all-time PV includes pruned months; all-time UV is the retained window only
-      // (prune deletes site_daily_tab by month, and the archive has no daily UV).
+      // Pruned days included: their site_daily_tab rows outlive the raw events.
       allTime: {
-        pv: windowPv(sealedAll, 0) + (archRow ? Number(archRow.pv) : 0),
+        pv: windowPv(sealedAll, 0),
         uv: windowUv(sealedAll, 0),
-        uv_note: "daily visitors over closed days in the retained ~6-month window",
+        uv_note: "daily visitors over every closed day on record",
       },
     },
     200,

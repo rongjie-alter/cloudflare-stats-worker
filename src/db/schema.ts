@@ -6,11 +6,11 @@
 // Storage model:
 //   * events_tab         raw one-row-per-pageview fact table (hot 6-month window)
 //   * dim_*_tab          dictionary/lookup tables (categorical dimensions -> integer FK)
-//   * site_daily_tab     per-day PV/UV rollup (headline cards + trend chart)
+//   * site_daily_tab     per-day PV/UV rollup (headline cards + trend chart); kept
+//                        forever, after the raw events are pruned (all-time cards)
 //   * dim_daily_tab      per-day, per-dimension rollup (dimension breakdowns)
 //   * hier_daily_tab     per-day rollup of the 3 drill-down hierarchies (sunburst)
 //   * meta_tab           rollup coverage bounds, archive window, daily visitor salts
-//   * events_monthly_tab archive of data older than 6 months (EAV long-format)
 //
 // PV = COUNT(*) over events_tab. UV = COUNT(DISTINCT visitor_id) over events_tab
 // PER DAY: visitor ids are salted per day (src/services/visitor-salt.ts), so a
@@ -186,29 +186,3 @@ export const metaTab = sqliteTable("meta_tab", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
-
-// ---------------------------------------------------------------------------
-// Monthly archive for data older than 6 months (raw rows pruned after rollup).
-// EAV long-format: one row per (month, dimension, value). uv is the sum of the
-// per-day distinct counts (visitor-days) for months aggregated after the daily
-// salt was introduced -- ids no longer link across days -- and a true monthly
-// distinct count for older ones. It is NOT cross-filterable: that detail is
-// destroyed on prune. The per-month grand total lives in the ('total','') row.
-// ---------------------------------------------------------------------------
-export const eventsMonthlyTab = sqliteTable(
-  "events_monthly_tab",
-  {
-    month: integer("month").notNull(), // yyyymm
-    dimension: text("dimension").notNull(), // 'total' or a DIMENSIONS key
-    value: text("value").notNull(), // dimension value; '' for the 'total' row
-    pv: integer("pv").notNull().default(0),
-    uv: integer("uv").notNull().default(0),
-  },
-  (t) => [
-    primaryKey({ columns: [t.month, t.dimension, t.value] }),
-    index("idx_events_monthly_dim").on(t.month, t.dimension),
-    // The all-time card sums WHERE dimension = 'total', which cannot use the
-    // index above (its leading column is `month`).
-    index("idx_events_monthly_total").on(t.dimension, t.month),
-  ]
-);

@@ -1,5 +1,7 @@
-// Retention: raw events older than 6 whole months are folded into
-// events_monthly_tab and deleted, together with their rollup rows.
+// Retention: raw events older than 6 whole months are deleted, together with
+// their dim/hier rollup rows. Their site_daily_tab rows are kept forever (one row
+// per day), so the all-time cards keep counting pruned days; per-value history
+// lives in the Parquet archive.
 //
 // The delete is spread over nights. A D1 delete bills one written row per row
 // removed (measured 2026-11-03: indexes are free on delete, unlike on insert), so
@@ -8,18 +10,26 @@
 // ingest drop real pageviews on every site sharing the account. Instead each run
 // deletes oldest day first until a write budget is spent, and carries on the
 // next night.
-import { DIMENSIONS, nullLabelFor } from "../dimensions.ts";
+import { DIMENSIONS } from "../dimensions.ts";
 import type { Db } from "../db/client.ts";
-import { firstDayOfNextMonth } from "../lib/days.ts";
-import { HIERARCHIES } from "./rollup.ts";
+import { firstDayOfNextMonth, offsetDayInt } from "../lib/days.ts";
+import { HIERARCHIES, sealSiteDaily } from "./rollup.ts";
 import { archiveCovers } from "./archive-export.ts";
-import { META_MIN_DAY, META_PRUNE_AGG_MONTH, invalidateMetaCache, raiseMetaMax, readMeta } from "./meta.ts";
+import {
+  META_MAX_DAY,
+  META_MIN_DAY,
+  META_PRUNE_AGG_MONTH,
+  invalidateMetaCache,
+  raiseMetaMax,
+  readMeta,
+  type Meta,
+} from "./meta.ts";
 
 // Written rows one nightly prune may spend (deleted events + rollup rows + the
-// monthly aggregate), across the whole run. Ingest is the other consumer of the
-// account-wide 100K/day: ~4 writes per pageview (2 once migration 0001 is
-// applied), ~13K pageviews on the busiest day seen so far. Steady state needs
-// only ~ingest per night, so this leaves a backlog (a month is ~125K rows)
+// month's site_daily_tab gap fill), across the whole run. Ingest is the other
+// consumer of the account-wide 100K/day: ~4 writes per pageview (2 once migration
+// 0001 is applied), ~13K pageviews on the busiest day seen so far. Steady state
+// needs only ~ingest per night, so this leaves a backlog (a month is ~125K rows)
 // draining over about four or five nights without ever being the thing that
 // exhausts the day.
 export const PRUNE_WRITES_PER_RUN = 30000;
@@ -35,35 +45,15 @@ export function retentionCutoff(today: number): number {
   return (cy * 100 + cm) * 100;
 }
 
-// Written rows to insert one events_monthly_tab row if the schema cannot be read:
-// the rowid, its composite primary key's implicit index and two indexes.
-const MONTHLY_INSERT_COST_FALLBACK = 4;
-
-// Written rows per inserted events_monthly_tab row: the row plus one per index.
-// That includes the implicit index of a rowid table with a composite primary key
-// (sqlite_autoindex_*). Only inserts pay per index; a delete is one written row
-// whatever the table's indexes, so deletes below are counted at 1.
-async function monthlyInsertCost(d1: D1Database): Promise<number> {
-  try {
-    const row = await d1
-      .prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events_monthly_tab'")
-      .first<{ n: number }>();
-    return 1 + Number(row?.n ?? MONTHLY_INSERT_COST_FALLBACK - 1);
-  } catch {
-    return MONTHLY_INSERT_COST_FALLBACK;
-  }
-}
-
 const changes = (r: D1Result | undefined): number => Number(r?.meta?.changes ?? 0);
 const sumChanges = (results: D1Result[]): number => results.reduce((s, r) => s + changes(r), 0);
 
-// Archive + prune expired raw events, oldest day first, spending at most
-// `budget` written rows. Stops at the first day the Parquet archive does not
-// cover yet, so raw rows are never destroyed before they reach R2.
+// Prune expired raw events, oldest day first, spending at most `budget` written
+// rows. Stops at the first day the Parquet archive does not cover yet, so raw rows
+// are never destroyed before they reach R2.
 export async function pruneExpiredDays(env: Env, db: Db, today: number, budget = PRUNE_WRITES_PER_RUN): Promise<void> {
   const d1 = db.$client;
   const cutoffDay = retentionCutoff(today);
-  const insertCost = await monthlyInsertCost(d1);
   let spent = 0;
   let days = 0;
   let events = 0;
@@ -86,21 +76,15 @@ export async function pruneExpiredDays(env: Env, db: Db, today: number, budget =
       break;
     }
 
-    // First day of a month to be pruned: write the whole month's aggregate while
-    // every one of its raw rows is still there, and take the month out of the
-    // rollups in the same transaction. After this events_monthly_tab owns the
-    // month's totals, so a site_daily_tab row left behind would make the
-    // all-time PV card count that day twice for as long as the raw rows linger.
-    // rollup_min_day and prune_agg_month move past the month, so /api/query and
-    // /api/timeseries stop reading it at all (meta.ts retainedFloor) rather than
-    // count whatever raw rows are left mid-drain.
+    // First day of a month to be pruned: freeze the month while every one of its
+    // raw rows is still there. See closeMonth.
     const meta = await readMeta(db);
     if (Number(meta[META_PRUNE_AGG_MONTH] ?? 0) < month) {
       if (!(await archiveCovers(env, db, day, month * 100 + 31))) {
         console.warn(`[worker] not pruning month ${month}: Parquet archive does not cover all of it yet`);
         break;
       }
-      spent += await writeMonthAggregate(db, month, insertCost);
+      spent += await closeMonth(db, month, meta);
       invalidateMetaCache();
     }
 
@@ -137,50 +121,39 @@ export async function pruneExpiredDays(env: Env, db: Db, today: number, budget =
   if (days > 0) console.log(`[worker] pruned ${events} events across ${days} day(s), ~${spent}/${budget} writes`);
 }
 
+// Freeze one month before its first raw row is deleted, in one transaction:
+//
+// 1. Seal into site_daily_tab every day of the month the sealed window
+//    [rollup_min_day, rollup_max_day] does not cover. Normally there is none and
+//    this reads nothing; it scans only the uncovered days otherwise. Those rows
+//    are what the all-time cards count once the raw rows are gone.
+// 2. Move rollup_min_day past the month: its dim/hier rows are about to go.
+// 3. Record prune_agg_month. From now on /api/query and /api/timeseries stop
+//    reading the month (meta.ts retainedFloor) rather than count whatever raw rows
+//    are left mid-drain, and extendRollupHistory never re-seals it.
+//
 // Returns the written rows it spent.
-async function writeMonthAggregate(db: Db, month: number, insertCost: number): Promise<number> {
+async function closeMonth(db: Db, month: number, meta: Meta): Promise<number> {
   const d1 = db.$client;
   const start = month * 100 + 1;
-  const end = month * 100 + 31;
-
-  const statements: D1PreparedStatement[] = [
-    d1
-      .prepare(
-        `INSERT INTO events_monthly_tab (month, dimension, value, pv, uv)
-         SELECT ?, 'total', '', COUNT(*), COUNT(DISTINCT visitor_id) FROM events_tab WHERE day BETWEEN ? AND ?
-         ON CONFLICT(month, dimension, value) DO UPDATE SET pv = excluded.pv, uv = excluded.uv`
-      )
-      .bind(month, start, end),
-  ];
-
-  for (const [dimension, dim] of Object.entries(DIMENSIONS)) {
-    statements.push(
-      d1
-        .prepare(
-          // LEFT JOIN, not JOIN: an inner join silently dropped every row whose
-          // dimension FK was NULL — all direct traffic, for one — so the
-          // archived per-dimension PV did not add up to the 'total' row.
-          `INSERT INTO events_monthly_tab (month, dimension, value, pv, uv)
-           SELECT ?, ?, COALESCE(d.value, ?), COUNT(*), COUNT(DISTINCT e.visitor_id)
-           FROM events_tab e LEFT JOIN ${dim.table} d ON d.id = e.${dim.col}
-           WHERE e.day BETWEEN ? AND ? GROUP BY e.${dim.col}
-           ON CONFLICT(month, dimension, value) DO UPDATE SET pv = excluded.pv, uv = excluded.uv`
-        )
-        .bind(month, dimension, nullLabelFor(dimension), start, end)
-    );
-  }
-  const aggregateCount = statements.length;
-
-  statements.push(
-    d1.prepare("DELETE FROM site_daily_tab WHERE day BETWEEN ? AND ?").bind(start, end),
-    raiseMetaMax(d1, META_MIN_DAY, firstDayOfNextMonth(month)),
-    raiseMetaMax(d1, META_PRUNE_AGG_MONTH, month)
+  const end = offsetDayInt(firstDayOfNextMonth(month), -1);
+  const statements = uncoveredDays(start, end, Number(meta[META_MIN_DAY] ?? 0), Number(meta[META_MAX_DAY] ?? 0)).map(
+    ([from, to]) => sealSiteDaily(d1, from, to)
   );
+  const sealCount = statements.length;
+  statements.push(raiseMetaMax(d1, META_MIN_DAY, firstDayOfNextMonth(month)), raiseMetaMax(d1, META_PRUNE_AGG_MONTH, month));
 
   const results = await d1.batch(statements);
-  console.log(`[worker] aggregated month ${month}`);
-  // Each aggregate row is a rowid insert plus an entry in every index on the
-  // table, not one written row; the site_daily_tab delete and the two meta_tab
-  // bounds are one each.
-  return sumChanges(results.slice(0, aggregateCount)) * insertCost + sumChanges(results.slice(aggregateCount));
+  const sealed = sumChanges(results.slice(0, sealCount));
+  console.log(`[worker] closed month ${month}${sealed ? `, sealed ${sealed} missing site_daily_tab day(s)` : ""}`);
+  return sumChanges(results);
+}
+
+// The parts of [start, end] outside the sealed window [minDay, maxDay] (0 = none).
+export function uncoveredDays(start: number, end: number, minDay: number, maxDay: number): [number, number][] {
+  if (!minDay || !maxDay || maxDay < start || minDay > end) return [[start, end]];
+  const out: [number, number][] = [];
+  if (minDay > start) out.push([start, offsetDayInt(minDay, -1)]);
+  if (maxDay < end) out.push([offsetDayInt(maxDay, 1), end]);
+  return out;
 }
