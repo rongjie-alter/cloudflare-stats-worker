@@ -113,6 +113,11 @@ export function LiveMap({ countryCounts }: { countryCounts: Record<string, numbe
           // The map's regions are keyed by ISO alpha-2 (the GeoJSON has no
           // `name` property), so without this a hovered region has no name.
           nameProperty: "ISO_A2_EH",
+          // ECharts deliberately does not apply the global tooltip formatter
+          // to components, so a bare region (a country with no pageview, which
+          // has no dot to fall through to the series tooltip) would show its
+          // raw ISO code ("MY"). It needs its own formatter.
+          tooltip: { formatter: (o: any) => `${countryName(o.name)}: ${countryCounts[o.name] ?? 0}` },
           roam: true,
           itemStyle: { areaColor: noDataColor, borderColor: p.grid },
           emphasis: { itemStyle: { areaColor: noDataColor } },
