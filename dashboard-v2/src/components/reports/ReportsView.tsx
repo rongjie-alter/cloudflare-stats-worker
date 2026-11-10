@@ -168,12 +168,13 @@ export default function ReportsView() {
       .catch(() => undefined); // the next tick or ↻ tries again
   }, [clockToday]);
 
-  // Default range: the last 30 days, clipped to what the archive has. After
+  // Default range: the last 7 days, clipped to what the archive has (a smaller
+  // first download than 30 days; a wider range is one click away). After
   // that, a preset (and a preset comparison) is re-resolved against each new
   // manifest, so "Last 7 days" still means that once the day has rolled over.
   useEffect(() => {
     if (!manifest) return;
-    const current = reportPicker.value ?? { preset: "last30d" as const, range: { from: today, to: today }, compare: null, weekStart: weekStart.value };
+    const current = reportPicker.value ?? { preset: "last7d" as const, range: { from: today, to: today }, compare: null, weekStart: weekStart.value };
     const next = resolvePreset(current, today, bounds?.min);
     if (JSON.stringify(next) !== JSON.stringify(reportPicker.value)) reportPicker.value = next;
   }, [manifest]);
