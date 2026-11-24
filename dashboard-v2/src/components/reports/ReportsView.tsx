@@ -22,13 +22,17 @@ import {
   alignTrend,
   breakdown,
   mergeBreakdown,
+  alignRowTrend,
   mergeTuples,
+  rowTrend,
   totals,
   trend,
   tuples,
   type CountRow,
+  type RowTrendPoint,
   type Totals,
   type TrendPoint,
+  type Where,
 } from "../../duck/report";
 import { compileFilters } from "../../duck/sql";
 import type { AsyncState } from "../../hooks";
@@ -38,14 +42,16 @@ import {
   reportFilters,
   reportMetric,
   reportPicker,
+  reportTrendPanel,
   toggleRowFilter,
+  toggleTrendPanel,
 } from "../../state/reports";
-import { PANEL_DIMENSIONS, setWeekStart, today as storeToday, weekStart } from "../../state/store";
+import { DIMENSION_LABELS, PANEL_DIMENSIONS, setWeekStart, today as storeToday, weekStart } from "../../state/store";
 import { REPORT_PRESETS, compareRangeFor, formatRange, rangeForPreset, rangeLength, shiftDays, type DateRange } from "../../state/range";
 import { fmtNum } from "../../utils/format";
 import { DateRangePicker, type PickerValue } from "../DateRangePicker";
 import { Drawer, type DrawerSource } from "../Drawer";
-import { PanelCard } from "../PanelCard";
+import { PanelCard, rowLabel, shownRows } from "../PanelCard";
 import { ReportCards } from "./ReportCards";
 import { ReportFilterBar } from "./ReportFilterBar";
 import { ReportTrend } from "./ReportTrend";
@@ -89,6 +95,8 @@ interface Result {
   cur: Side;
   prev: Side | null;
   loaded: Loaded; // what was queried: labels and the trend axis come from here
+  where: Where; // the filters it was queried with
+  seq: number; // bumped per result, so derived queries can tell them apart
 }
 
 async function querySide(range: DayRange, where: ReturnType<typeof compileFilters>): Promise<Side> {
@@ -128,6 +136,7 @@ export default function ReportsView() {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const resultSeq = useRef(0);
 
   const picker = reportPicker.value;
   const metric = reportMetric.value;
@@ -220,7 +229,7 @@ export default function ReportsView() {
         loaded.compare ? querySide(loaded.compare, where) : Promise.resolve(null),
       ]);
       if (!cancelled) {
-        setResult({ cur, prev, loaded });
+        setResult({ cur, prev, loaded, where, seq: ++resultSeq.current });
         setError(null);
       }
     })().catch((err) => !cancelled && setError(`Query failed: ${err.message ?? err}`));
@@ -253,6 +262,66 @@ export default function ReportsView() {
     onRowFilter: toggleRowFilter,
     onDimensionChange: (d) => (reportDrawer.value = d),
     onClose: () => (reportDrawer.value = null),
+  };
+
+  // Everything below the toolbar describes the result, not the selection: while a
+  // new range downloads, the old figures keep their own labels and axis.
+  const shown = result?.loaded;
+  const labelCur = shown ? formatRange(shown.picker.range, today) : "";
+  const labelPrev = shown?.picker.compare ? formatRange(shown.picker.compare.range, today) : "";
+  const comparing = result?.prev != null;
+  const curRange = shown?.picker.range;
+  const prevRange = shown?.picker.compare?.range;
+
+  // The trend's inputs, memoized: a new array would redraw the chart from scratch
+  // on every render and reset what the user toggled in its legend.
+  const trendDates = useMemo(() => (curRange ? datesOf(curRange) : []), [result]);
+  const trendPrevDates = useMemo(() => (prevRange ? datesOf(prevRange) : []), [result]);
+  const trendCur = useMemo(
+    () => (result && curRange ? alignTrend(result.cur.trend, result.loaded.primary, metric, rangeLength(curRange)) : []),
+    [result, metric]
+  );
+  const trendPrev = useMemo(
+    () =>
+      result?.prev && result.loaded.compare && curRange
+        ? alignTrend(result.prev.trend, result.loaded.compare, metric, rangeLength(curRange))
+        : null,
+    [result, metric]
+  );
+
+  // The active panel's rows as lines in the daily trend. The rows are the ones the
+  // card shows (they follow the metric: the top 8 by page views or by visitors),
+  // queried per day once for both metrics. The query is tied to the result on
+  // screen (its range, its filters, its seq), never to the live filters, so the
+  // lines are always drawn against the total they were computed with.
+  const trendPanel = reportTrendPanel.value;
+  const chartCard = useRef<HTMLDivElement>(null);
+  const trendKeys = useMemo(
+    () =>
+      result && trendPanel
+        ? shownRows(trendPanel, mergeBreakdown(result.cur.panels[trendPanel], result.prev?.panels[trendPanel] ?? null, metric)).map((r) => r.key)
+        : [],
+    [result, trendPanel, metric]
+  );
+  const trendId = JSON.stringify([trendPanel, trendKeys, result?.seq]);
+  const rowTrendState = useReportQuery<{ id: string; points: RowTrendPoint[] } | null>(trendId, async () =>
+    trendPanel && result && trendKeys.length
+      ? { id: trendId, points: await rowTrend(result.loaded.primary, trendPanel, trendKeys, result.where) }
+      : null
+  );
+  const trendRows = useMemo(() => {
+    const d = rowTrendState.data;
+    if (!result || !trendPanel || !d || d.id !== trendId) return null;
+    return trendKeys.map((k) => ({ name: rowLabel(trendPanel, k), data: alignRowTrend(d.points, k, trendCur, result.loaded.primary, metric) }));
+  }, [rowTrendState.data, trendId, result, trendPanel, trendKeys, trendCur, metric]);
+
+  const onTrend = (d: Dimension) => {
+    const activating = reportTrendPanel.value !== d;
+    toggleTrendPanel(d);
+    if (activating) {
+      const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      chartCard.current?.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+    }
   };
 
   const apply = (v: PickerValue) => {
@@ -330,15 +399,6 @@ export default function ReportsView() {
     if (c.missing) parts.push(`${c.missing} with no data`);
     return `${label}: ${c.days} days — ${parts.join(", ")}`;
   };
-
-  // Everything below the toolbar describes the result, not the selection: while a
-  // new range downloads, the old figures keep their own labels and axis.
-  const shown = result?.loaded;
-  const labelCur = shown ? formatRange(shown.picker.range, today) : "";
-  const labelPrev = shown?.picker.compare ? formatRange(shown.picker.compare.range, today) : "";
-  const comparing = result?.prev != null;
-  const curRange = shown?.picker.range;
-  const prevRange = shown?.picker.compare?.range;
 
   return (
     <div
@@ -427,6 +487,7 @@ export default function ReportsView() {
         </div>
       )}
       {error && <div class="mom-error">{error}</div>}
+      {rowTrendState.error && <div class="mom-error">Trend by {trendPanel ? DIMENSION_LABELS[trendPanel] : "row"} failed: {rowTrendState.error}</div>}
 
       <ReportFilterBar dataVersion={dataVersion} />
 
@@ -435,21 +496,23 @@ export default function ReportsView() {
       {result && curRange && (
         <>
           <ReportCards cur={result.cur.totals} prev={result.prev?.totals ?? null} labelPrev={labelPrev} />
-          <div class="chart-card">
+          <div class="chart-card" ref={chartCard}>
             <div class="panel-head">
-              <h3>Daily trend</h3>
+              <h3>Daily trend{trendRows && trendPanel ? ` by ${DIMENSION_LABELS[trendPanel]}` : ""}</h3>
+              {trendPanel && (
+                <button class="expand" onClick={() => (reportTrendPanel.value = null)}>
+                  Clear ✕
+                </button>
+              )}
             </div>
             <ReportTrend
-              dates={datesOf(curRange)}
-              cur={alignTrend(result.cur.trend, result.loaded.primary, metric, rangeLength(curRange))}
-              prev={
-                comparing && result.loaded.compare
-                  ? alignTrend(result.prev!.trend, result.loaded.compare, metric, rangeLength(curRange))
-                  : null
-              }
-              prevDates={prevRange ? datesOf(prevRange) : []}
+              dates={trendDates}
+              cur={trendCur}
+              prev={trendPrev}
+              prevDates={trendPrevDates}
               labelCur={labelCur}
               labelPrev={labelPrev}
+              rows={trendRows}
             />
           </div>
           <div class="panel-grid">
@@ -461,6 +524,8 @@ export default function ReportsView() {
                 error={null}
                 comparing={comparing}
                 onDetails={() => (reportDrawer.value = d)}
+                trendActive={trendPanel === d}
+                onTrend={() => onTrend(d)}
               />
             ))}
           </div>

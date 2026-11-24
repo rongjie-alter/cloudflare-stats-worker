@@ -92,6 +92,27 @@ export async function breakdown(range: DayRange, dim: Dimension, where: Where): 
   return rows.map((r) => ({ key: r.k, pv: r.pv, uv: round1(r.uv) }));
 }
 
+export interface RowTrendPoint {
+  key: string;
+  day: number; // yyyymmdd
+  pv: number;
+  uv: number; // distinct visitors that day, for that value
+}
+
+// The daily trend of specific values of one dimension (a panel's rows): one
+// point per value per day it had events. Distinct visitors are per day and per
+// value, so each line is an exact daily figure, never a sum.
+export async function rowTrend(range: DayRange, dim: Dimension, keys: string[], where: Where): Promise<RowTrendPoint[]> {
+  if (!keys.length) return [];
+  return query<RowTrendPoint>(
+    `SELECT k AS "key", day, pv, uv FROM (
+       SELECT COALESCE(${dim}, ?) AS k, day, COUNT(*) AS pv, COUNT(DISTINCT visitor_id) AS uv
+       FROM events WHERE day BETWEEN ? AND ?${where.sql} GROUP BY 1, 2
+     ) WHERE k IN (${keys.map(() => "?").join(", ")})`,
+    [nullLabel(dim), range.from, range.to, ...where.params, ...keys]
+  );
+}
+
 // A hierarchy in one statement, with GROUP BY ROLLUP so that every prefix also
 // gets a row of its own. A visitor on two browser versions is one browser, so a
 // parent ring cannot be the sum of its children: the ROLLUP rows carry the exact
@@ -162,6 +183,20 @@ export function alignTrend(points: TrendPoint[], range: DayRange, metric: Metric
   for (const p of points) {
     const i = Math.round((ms(p.day) - start) / 86400000);
     if (i >= 0 && i < length) out[i] = p[metric];
+  }
+  return out;
+}
+
+// One value's line, on the same axis as the total: a day the total has events
+// on but this value does not is a real 0, while a day with no events at all
+// stays a gap (the total's null).
+export function alignRowTrend(points: RowTrendPoint[], key: string, total: (number | null)[], range: DayRange, metric: Metric): (number | null)[] {
+  const out: (number | null)[] = total.map((t) => (t === null ? null : 0));
+  const start = ms(range.from);
+  for (const p of points) {
+    if (p.key !== key) continue;
+    const i = Math.round((ms(p.day) - start) / 86400000);
+    if (i >= 0 && i < out.length && out[i] !== null) out[i] = p[metric];
   }
   return out;
 }

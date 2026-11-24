@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { echarts } from "../../charts/echarts";
 import { palette, SERIES_COLORS } from "../../charts/theme";
 import { theme } from "../../state/store";
+import { escHtml } from "../../utils/format";
+
+const TOTAL = "Total";
 
 // The range's daily trend, with the comparison range overlaid. Both are indexed
 // from their own start day, so the same point in each lines up regardless of
@@ -13,6 +16,7 @@ export function ReportTrend({
   prevDates,
   labelCur,
   labelPrev,
+  rows = null,
 }: {
   dates: string[];
   cur: (number | null)[];
@@ -20,6 +24,9 @@ export function ReportTrend({
   prevDates: string[];
   labelCur: string;
   labelPrev: string;
+  // A panel's rows as lines, each in its own colour. The total stays as a grey
+  // dashed reference on the same axis; the comparison overlay is not drawn.
+  rows?: { name: string; data: (number | null)[] }[] | null;
 }) {
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<ReturnType<typeof echarts.init> | null>(null);
@@ -42,6 +49,45 @@ export function ReportTrend({
   useEffect(() => {
     if (!ready || !chart.current) return;
     const p = palette();
+    if (rows) {
+      chart.current.setOption(
+        {
+          grid: { left: 48, right: 16, top: 36, bottom: 28 },
+          legend: { type: "scroll", data: [TOTAL, ...rows.map((r) => r.name)], textStyle: { color: p.muted }, pageTextStyle: { color: p.muted }, top: 0 },
+          tooltip: {
+            trigger: "axis",
+            formatter: (params: any[]) => {
+              const i = params[0]?.dataIndex ?? 0;
+              const sorted = [...params].sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
+              return [escHtml(dates[i]), ...sorted.map((s) => `${s.marker}${escHtml(s.seriesName)}: <b>${s.value == null ? "no data" : Number(s.value).toLocaleString()}</b>`)].join("<br/>");
+            },
+          },
+          xAxis: { type: "category", data: dates, axisLine: { lineStyle: { color: p.grid } }, axisLabel: { color: p.muted } },
+          yAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: p.grid } }, axisLabel: { color: p.muted } },
+          series: [
+            {
+              name: TOTAL,
+              type: "line",
+              symbol: "none",
+              lineStyle: { width: 1.5, type: "dashed", color: p.muted },
+              itemStyle: { color: p.muted },
+              data: cur,
+            },
+            ...rows.map((r, i) => ({
+              name: r.name,
+              type: "line",
+              symbol: "circle",
+              symbolSize: 5,
+              lineStyle: { width: 2, color: SERIES_COLORS[i % SERIES_COLORS.length] },
+              itemStyle: { color: SERIES_COLORS[i % SERIES_COLORS.length] },
+              data: r.data,
+            })),
+          ],
+        },
+        true
+      );
+      return;
+    }
     chart.current.setOption(
       {
         grid: { left: 48, right: 16, top: prev ? 32 : 16, bottom: 28 },
@@ -95,7 +141,7 @@ export function ReportTrend({
       },
       true
     );
-  }, [ready, dates, cur, prev, prevDates, labelCur, labelPrev, themeVal]);
+  }, [ready, dates, cur, prev, prevDates, labelCur, labelPrev, rows, themeVal]);
 
   return <div ref={el} style="width:100%;height:260px;" />;
 }

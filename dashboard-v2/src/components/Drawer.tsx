@@ -13,7 +13,7 @@ import { CountryMap } from "./CountryMap";
 import type { AsyncState } from "../hooks";
 import { DIMENSION_LABELS, DRAWER_DIMENSIONS, HIERARCHY, theme } from "../state/store";
 import { countryName } from "../utils/countryName";
-import { fmtChange } from "../utils/format";
+import { escHtml, fmtChange } from "../utils/format";
 import { buildTree } from "../utils/tree";
 import type { AggregateRow, Dimension, Filter, FilterOp, HierarchyNode, TupleRow } from "../api/types";
 
@@ -340,7 +340,7 @@ function HierarchySunburst({ tree, metricLabel, comparing }: { tree: HierarchyNo
           trigger: "item",
           formatter: (params: any) => {
             const info = params.treePathInfo || [];
-            const path = info.slice(1).map((t: any) => t.name).join(" › ");
+            const path = info.slice(1).map((t: any) => escHtml(t.name)).join(" › ");
             const total = info[0]?.value ?? 0;
             const value = params.value ?? 0;
             const pct = total > 0 ? ` (${((value / total) * 100).toFixed(1)}%)` : "";

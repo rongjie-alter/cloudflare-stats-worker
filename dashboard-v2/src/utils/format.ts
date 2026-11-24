@@ -1,3 +1,10 @@
+// For ECharts tooltip formatters, whose string is rendered as HTML. Dimension
+// values come from beacons anyone can send, so they must never reach it raw.
+const HTML_ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+export function escHtml(s: unknown): string {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+}
+
 export function fmtNum(n: number): string {
   return n.toLocaleString();
 }

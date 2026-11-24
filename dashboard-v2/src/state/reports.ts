@@ -15,6 +15,12 @@ export const reportFilters = signal<ReportFilter[]>([]);
 export const reportAdvanced = signal<string>("");
 export const reportMetric = signal<"pv" | "uv">("pv");
 export const reportDrawer = signal<Dimension | null>(null);
+// The panel whose rows are plotted as lines in the daily trend, if any.
+export const reportTrendPanel = signal<Dimension | null>(null);
+
+export function toggleTrendPanel(dimension: Dimension) {
+  reportTrendPanel.value = reportTrendPanel.value === dimension ? null : dimension;
+}
 
 let nextId = 1;
 

@@ -82,6 +82,11 @@ body {
 .panel-head h3 { font-size: 13px; margin: 0; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
 .panel-head .expand { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 12px; }
 .panel-head .expand:hover { color: var(--accent); }
+.panel-actions { display: flex; align-items: center; gap: 6px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; background: none; border: 1px solid transparent; border-radius: 6px; color: var(--muted); cursor: pointer; }
+.icon-btn:hover:not(:disabled) { color: var(--accent); }
+.icon-btn.active { color: var(--accent); background: var(--accent-weak); border-color: var(--accent); }
+.icon-btn:disabled { opacity: 0.4; cursor: default; }
 
 .rows { display: flex; flex-direction: column; gap: 2px; }
 .row {
